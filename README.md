@@ -15,8 +15,22 @@ C:\path\to\buildup\Build\bin\Buildup.Cli\Debug\net10.0\buildup.exe --dry-run
 C:\path\to\buildup\Build\bin\Buildup.Cli\Debug\net10.0\buildup.exe
 ```
 
-On Linux/macOS, use the equivalent executable path without `.exe`, or invoke the
-`buildup.dll` with `dotnet`. `--help` prints usage. Unknown arguments return exit code 2;
+For distribution, publish a self-contained single executable:
+
+```powershell
+dotnet publish SRC/Buildup.Cli/Buildup.Cli.csproj -c Release -r win-x64
+```
+
+The result is `Build/publish/win-x64/buildup.exe`. Copy that executable alone; the
+target machine does not need .NET or companion DLLs. Git must still be on `PATH`.
+The bundled native runtime extracts to the OS temporary directory when needed.
+
+There is no single self-contained executable that runs on every OS and architecture.
+Publish separately with `-r linux-x64`, `linux-arm64`, `osx-x64`, `osx-arm64`, or
+`win-arm64` as needed. Each goes into its own `Build/publish/<runtime>/` directory;
+Linux/macOS executables are named `buildup` without `.exe`.
+
+`--help` prints usage. Unknown arguments return exit code 2;
 cleanup errors return 1 and are printed to standard error. Successful runs return 0.
 Each deleted path (or proposed deletion with `--dry-run`) is printed without formatting.
 

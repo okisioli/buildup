@@ -2,6 +2,10 @@
   <PropertyGroup>
     <OutputType>Exe</OutputType>
     <AssemblyName>buildup</AssemblyName>
+    <PublishSelfContained>true</PublishSelfContained>
+    <PublishSingleFile>true</PublishSingleFile>
+    <IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>
+    <PublishDir>$(MSBuildThisFileDirectory)../../Build/publish/$(RuntimeIdentifier)/</PublishDir>
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="../Buildup.Core/Buildup.Core.csproj" />

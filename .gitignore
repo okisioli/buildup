@@ -1,0 +1,22 @@
+# .NET build and publish output
+**/[Bb]in/
+**/[Oo]bj/
+build/
+artifacts/
+TestResults/
+*.nupkg
+*.snupkg
+*.user
+*.suo
+*.userosscache
+*.sln.docstates
+
+# IDE settings and caches
+.idea/
+.vs/
+_ReSharper*/
+*.DotSettings.user
+
+# OS files
+.DS_Store
+Thumbs.db

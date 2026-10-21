@@ -3,7 +3,7 @@ using Buildup.Core;
 if (args.Length == 1 && args[0] is "--help" or "-h")
 {
     Console.WriteLine("Usage: buildup [--dry-run]");
-    Console.WriteLine("Deletes Git-ignored files beneath the current directory, including nested repositories.");
+    Console.WriteLine("Deletes ignored files only in Git repositories rooted at or below the current directory.");
     Console.WriteLine("--dry-run  List what would be deleted without changing files.");
     return 0;
 }

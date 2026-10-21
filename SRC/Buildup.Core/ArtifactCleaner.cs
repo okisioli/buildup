@@ -18,13 +18,16 @@ public sealed class ArtifactCleaner
         var errors = new List<string>();
         var repositories = new HashSet<string>(PathComparer);
         var metadata = new HashSet<string>(PathComparer);
-        var containingRepository = Git(root, "rev-parse", "--show-toplevel");
-        if (containingRepository.ExitCode == 0)
-            repositories.Add(Path.TrimEndingDirectorySeparator(Path.GetFullPath(containingRepository.Output.TrimEnd('\r', '\n'))));
-
+        // Only explicit working-tree roots at or below the scan root are eligible.
+        // In particular, an ancestor repository must not turn Downloads into a cleanup target.
         Discover(root, repositories, metadata, errors);
         foreach (var repository in repositories)
         {
+            var topLevel = Git(repository, "rev-parse", "--show-toplevel");
+            if (topLevel.ExitCode != 0 || !PathComparer.Equals(repository,
+                Path.TrimEndingDirectorySeparator(Path.GetFullPath(topLevel.Output.TrimEnd('\r', '\n')))))
+                throw new InvalidOperationException($"Not a Git working-tree root: {repository}");
+
             foreach (var option in new[] { "--absolute-git-dir", "--git-common-dir" })
             {
                 var location = Git(repository, "rev-parse", "--path-format=absolute", option);
@@ -154,6 +157,8 @@ public sealed class ArtifactCleaner
     private static bool IsSafe(string path, string root, string repository, HashSet<string> repositories,
         HashSet<string> metadata)
     {
+        if (!PathComparer.Equals(repository, root) && !IsWithin(repository, root))
+            return false;
         if (!IsWithin(path, root) || !IsWithin(path, repository))
             return false;
         if (metadata.Any(directory => PathComparer.Equals(path, directory) || IsWithin(path, directory)))
@@ -195,6 +200,10 @@ public sealed class ArtifactCleaner
             StandardOutputEncoding = System.Text.Encoding.UTF8,
             StandardErrorEncoding = System.Text.Encoding.UTF8
         };
+        // Ambient Git overrides must not redirect reads to another working tree or index.
+        foreach (var name in startInfo.Environment.Keys
+            .Where(name => name.StartsWith("GIT_", StringComparison.OrdinalIgnoreCase)).ToArray())
+            startInfo.Environment.Remove(name);
         foreach (var argument in arguments)
             startInfo.ArgumentList.Add(argument);
         using var process = Process.Start(startInfo)

@@ -42,9 +42,16 @@ are preserved even when they match ignore patterns.
 
 Nested repositories, worktrees, and initialized submodules are handled separately.
 Git metadata, bare repositories, symbolic links, and junctions are left alone.
-Files outside repositories are left alone. When started inside a working tree, only
-paths beneath the current directory are eligible. Empty ignored directories are also
-removed. Avoid running builds or changing ignore rules during cleanup.
+Only repository roots found at or below the current directory are eligible. Running
+in Downloads, Photos, or any folder without repositories deletes nothing, even if it
+contains `.gitignore` files or is inside an ancestor repository. To clean a project,
+run from its repository root or a parent folder containing it. Running from an
+ordinary project subdirectory only cleans repositories nested beneath that directory.
+Each discovered `.git` marker is validated with Git before any cleanup starts.
+Git environment overrides (`GIT_*`) are ignored so they cannot redirect cleanup to a
+different worktree or index; on-disk ignore rules and Git configuration still apply.
+Empty ignored directories are also removed. Avoid running builds or changing ignore
+rules during cleanup.
 
 `SRC/Buildup.Core` owns discovery and deletion; `SRC/Buildup.Cli` only handles arguments
 and output. `Directory.Build.props` redirects build and intermediate output into

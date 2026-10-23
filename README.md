@@ -68,6 +68,9 @@ contains `.gitignore` files or is inside an ancestor repository. To clean a proj
 run from its repository root or a parent folder containing it. Running from an
 ordinary project subdirectory only cleans repositories nested beneath that directory.
 Each discovered `.git` marker is validated with Git before any cleanup starts.
+Folders that Git rejects (including invalid repositories or repositories with dubious
+ownership) are skipped without failing the run. Their paths and Git's reason are
+printed before the deletion prompt, and their contents are protected from cleanup.
 Git environment overrides (`GIT_*`) are ignored so they cannot redirect cleanup to a
 different worktree or index; on-disk ignore rules and Git configuration still apply.
 Empty ignored directories are also removed. Ignore rules and tracked status are

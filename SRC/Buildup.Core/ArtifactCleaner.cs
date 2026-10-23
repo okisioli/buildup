@@ -7,7 +7,7 @@ public sealed class ArtifactCleaner
     private static readonly StringComparer PathComparer = OperatingSystem.IsWindows()
         ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal;
 
-    public CleanupResult Clean(string rootPath, bool dryRun = false, Action<CleanupEntry>? onEntry = null)
+    public CleanupPlan Scan(string rootPath, Action<string>? onScanning = null)
     {
         var root = Path.TrimEndingDirectorySeparator(Path.GetFullPath(rootPath));
         if (!Directory.Exists(root))
@@ -20,7 +20,7 @@ public sealed class ArtifactCleaner
         var metadata = new HashSet<string>(PathComparer);
         // Only explicit working-tree roots at or below the scan root are eligible.
         // In particular, an ancestor repository must not turn Downloads into a cleanup target.
-        Discover(root, repositories, metadata, errors);
+        Discover(root, repositories, metadata, errors, onScanning);
         foreach (var repository in repositories)
         {
             var topLevel = Git(repository, "rev-parse", "--show-toplevel");
@@ -36,8 +36,8 @@ public sealed class ArtifactCleaner
                 metadata.Add(Path.TrimEndingDirectorySeparator(Path.GetFullPath(location.Output.TrimEnd('\r', '\n'))));
             }
         }
-        var files = 0;
-        var directories = 0;
+        var entries = new List<CleanupEntry>();
+        long bytesToDelete = 0;
         foreach (var repository in repositories.Order(PathComparer))
         {
             try
@@ -50,15 +50,14 @@ public sealed class ArtifactCleaner
 
                 foreach (var path in ignoredFiles)
                 {
-                    if (!IsSafe(path, root, repository, repositories, metadata) || !File.Exists(path))
-                        continue;
                     try
                     {
-                        if (!dryRun)
-                            File.Delete(path);
+                        if (!IsSafe(path, root, repository, repositories, metadata) || !File.Exists(path))
+                            continue;
+                        var size = new FileInfo(path).Length;
                         removed.Add(path);
-                        files++;
-                        onEntry?.Invoke(new CleanupEntry(path, false));
+                        entries.Add(new CleanupEntry(path, false));
+                        bytesToDelete += size;
                     }
                     catch (Exception ex) when (IsFileSystemError(ex))
                     {
@@ -76,13 +75,10 @@ public sealed class ArtifactCleaner
                     try
                     {
                         // Never recursively delete: unexpected files or concurrent writes keep the directory alive.
-                        if (Directory.EnumerateFileSystemEntries(path).Any(child => !dryRun || !removed.Contains(child)))
+                        if (Directory.EnumerateFileSystemEntries(path).Any(child => !removed.Contains(child)))
                             continue;
-                        if (!dryRun)
-                            Directory.Delete(path);
                         removed.Add(path);
-                        directories++;
-                        onEntry?.Invoke(new CleanupEntry(path, true));
+                        entries.Add(new CleanupEntry(path, true));
                     }
                     catch (Exception ex) when (IsFileSystemError(ex))
                     {
@@ -96,11 +92,67 @@ public sealed class ArtifactCleaner
             }
         }
 
-        return new CleanupResult(files, directories, errors.AsReadOnly());
+        return new CleanupPlan(root, repositories, metadata, entries.AsReadOnly(), bytesToDelete, errors.AsReadOnly());
     }
 
-    private static void Discover(string path, HashSet<string> repositories, HashSet<string> metadata, List<string> errors)
+    public CleanupResult Delete(CleanupPlan plan, Action<string>? onRemoving = null)
     {
+        var errors = new List<string>();
+        var files = 0;
+        var directories = 0;
+        long bytesDeleted = 0;
+        var reported = new HashSet<string>(PathComparer);
+        foreach (var repository in plan.Repositories.Order(PathComparer))
+        {
+            try
+            {
+                // Recheck ignore rules and tracked status after confirmation. Only approved paths are eligible.
+                var ignored = new HashSet<string>(IgnoredPaths(repository, false), PathComparer);
+                foreach (var entry in plan.Entries.Where(entry => IsWithin(entry.Path, repository)))
+                {
+                    try
+                    {
+                        if (!IsSafe(entry.Path, plan.RootPath, repository, plan.Repositories, plan.Metadata))
+                            continue;
+                        if (entry.IsDirectory)
+                        {
+                            if (!Directory.Exists(entry.Path) || Directory.EnumerateFileSystemEntries(entry.Path).Any())
+                                continue;
+                            if (reported.Add(entry.Path))
+                                onRemoving?.Invoke(entry.Path);
+                            // Never recursively delete: new or preserved files keep the folder alive.
+                            Directory.Delete(entry.Path);
+                            directories++;
+                        }
+                        else if (ignored.Contains(entry.Path) && File.Exists(entry.Path))
+                        {
+                            var folder = Path.GetDirectoryName(entry.Path)!;
+                            if (reported.Add(folder))
+                                onRemoving?.Invoke(folder);
+                            var size = new FileInfo(entry.Path).Length;
+                            File.Delete(entry.Path);
+                            bytesDeleted += size;
+                            files++;
+                        }
+                    }
+                    catch (Exception ex) when (IsFileSystemError(ex))
+                    {
+                        errors.Add($"{entry.Path}: {ex.Message}");
+                    }
+                }
+            }
+            catch (Exception ex) when (IsFileSystemError(ex) || ex is InvalidOperationException)
+            {
+                errors.Add($"{repository}: {ex.Message}");
+            }
+        }
+        return new CleanupResult(files, directories, bytesDeleted, errors.AsReadOnly());
+    }
+
+    private static void Discover(string path, HashSet<string> repositories, HashSet<string> metadata,
+        List<string> errors, Action<string>? onScanning)
+    {
+        onScanning?.Invoke(path);
         try
         {
             if (File.Exists(Path.Combine(path, ".git")) || Directory.Exists(Path.Combine(path, ".git")))
@@ -115,7 +167,7 @@ public sealed class ArtifactCleaner
             foreach (var directory in Directory.EnumerateDirectories(path))
             {
                 if (!IsGitMetadata(directory) && !IsLink(directory))
-                    Discover(directory, repositories, metadata, errors);
+                    Discover(directory, repositories, metadata, errors, onScanning);
             }
         }
         catch (Exception ex) when (IsFileSystemError(ex))

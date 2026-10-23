@@ -8,7 +8,7 @@ public sealed class ArtifactCleaner
         ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal;
 
     public CleanupPlan Scan(string rootPath, Action<string>? onScanning = null,
-        Action<string, int, int>? onProgress = null)
+        Action<string, int, int>? onProgress = null, Action<string>? onDetail = null)
     {
         var root = Path.TrimEndingDirectorySeparator(Path.GetFullPath(rootPath));
         if (!Directory.Exists(root))
@@ -24,10 +24,29 @@ public sealed class ArtifactCleaner
         // Only explicit working-tree roots at or below the scan root are eligible.
         // In particular, an ancestor repository must not turn Downloads into a cleanup target.
         Discover(root, candidates, metadata, errors, onScanning);
+        var entries = new List<CleanupEntry>();
+        long bytesToDelete = 0;
+        var files = 0;
+        var directories = 0;
+        var lastDetail = Stopwatch.GetTimestamp();
+
+        void ReportDetail(string repository, string activity, string? path = null, bool force = false)
+        {
+            if (onDetail is null || (!force && Stopwatch.GetElapsedTime(lastDetail).TotalMilliseconds < 100))
+                return;
+            lastDetail = Stopwatch.GetTimestamp();
+            var name = Path.GetRelativePath(root, repository);
+            if (name == ".")
+                name = new DirectoryInfo(root).Name;
+            var location = path is null ? "" : $": {Path.GetRelativePath(repository, path)}";
+            onDetail($"{name} — {activity}{location} | {files:N0} files, {directories:N0} folders eligible; {bytesToDelete:N0} bytes");
+        }
+
         var validated = 0;
         foreach (var repository in candidates)
         {
             onProgress?.Invoke("Validating repositories", ++validated, candidates.Count);
+            ReportDetail(repository, "Checking working-tree root", force: true);
             var topLevel = Git(repository, "rev-parse", "--show-toplevel");
             if (topLevel.ExitCode != 0 || !PathComparer.Equals(repository,
                 Path.TrimEndingDirectorySeparator(Path.GetFullPath(topLevel.Output.TrimEnd('\r', '\n')))))
@@ -42,6 +61,8 @@ public sealed class ArtifactCleaner
             var valid = true;
             foreach (var option in new[] { "--absolute-git-dir", "--git-common-dir" })
             {
+                ReportDetail(repository, option == "--absolute-git-dir"
+                    ? "Locating Git metadata" : "Locating shared Git metadata", force: true);
                 var location = Git(repository, "rev-parse", "--path-format=absolute", option);
                 if (location.ExitCode != 0)
                 {
@@ -55,8 +76,6 @@ public sealed class ArtifactCleaner
             if (valid)
                 repositories.Add(repository);
         }
-        var entries = new List<CleanupEntry>();
-        long bytesToDelete = 0;
         var calculated = 0;
         foreach (var repository in repositories.Order(PathComparer))
         {
@@ -64,13 +83,17 @@ public sealed class ArtifactCleaner
             try
             {
                 // Git supplies untracked ignored paths, so tracked files are never candidates.
+                ReportDetail(repository, "Asking Git for ignored files", force: true);
                 var ignoredFiles = IgnoredPaths(repository, false);
+                ReportDetail(repository, "Asking Git for ignored folders", force: true);
                 var ignoredDirectories = IgnoredPaths(repository, true);
                 var directoryCandidates = new HashSet<string>(PathComparer);
                 var removed = new HashSet<string>(PathComparer);
 
+                ReportDetail(repository, $"Measuring {ignoredFiles.Length:N0} ignored files", force: true);
                 foreach (var path in ignoredFiles)
                 {
+                    ReportDetail(repository, "Measuring ignored files", path);
                     try
                     {
                         if (!IsSafe(path, root, repository, repositories, metadata) || !File.Exists(path))
@@ -78,6 +101,7 @@ public sealed class ArtifactCleaner
                         var size = new FileInfo(path).Length;
                         removed.Add(path);
                         entries.Add(new CleanupEntry(path, false, size));
+                        files++;
                         bytesToDelete += size;
                     }
                     catch (Exception ex) when (IsFileSystemError(ex))
@@ -86,11 +110,15 @@ public sealed class ArtifactCleaner
                     }
                 }
 
+                ReportDetail(repository, "Finding ignored subfolders", force: true);
                 foreach (var path in ignoredDirectories.Where(Directory.Exists))
-                    CollectDirectories(path, root, repository, repositories, metadata, directoryCandidates, errors);
+                    CollectDirectories(path, root, repository, repositories, metadata, directoryCandidates, errors,
+                        folder => ReportDetail(repository, "Finding ignored subfolders", folder));
 
+                ReportDetail(repository, $"Checking {directoryCandidates.Count:N0} artifact folders", force: true);
                 foreach (var path in directoryCandidates.OrderByDescending(path => path.Length))
                 {
+                    ReportDetail(repository, "Checking artifact folders", path);
                     if (!IsSafe(path, root, repository, repositories, metadata))
                         continue;
                     try
@@ -100,12 +128,14 @@ public sealed class ArtifactCleaner
                             continue;
                         removed.Add(path);
                         entries.Add(new CleanupEntry(path, true));
+                        directories++;
                     }
                     catch (Exception ex) when (IsFileSystemError(ex))
                     {
                         errors.Add($"{path}: {ex.Message}");
                     }
                 }
+                ReportDetail(repository, "Repository calculation complete", force: true);
             }
             catch (Exception ex) when (IsFileSystemError(ex) || ex is InvalidOperationException)
             {
@@ -218,15 +248,17 @@ public sealed class ArtifactCleaner
     }
 
     private static void CollectDirectories(string path, string root, string repository,
-        HashSet<string> repositories, HashSet<string> metadata, HashSet<string> candidates, List<string> errors)
+        HashSet<string> repositories, HashSet<string> metadata, HashSet<string> candidates, List<string> errors,
+        Action<string>? onDirectory = null)
     {
         if (!IsSafe(path, root, repository, repositories, metadata))
             return;
         try
         {
             candidates.Add(path);
+            onDirectory?.Invoke(path);
             foreach (var child in Directory.EnumerateDirectories(path))
-                CollectDirectories(child, root, repository, repositories, metadata, candidates, errors);
+                CollectDirectories(child, root, repository, repositories, metadata, candidates, errors, onDirectory);
         }
         catch (Exception ex) when (IsFileSystemError(ex))
         {

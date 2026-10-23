@@ -22,10 +22,20 @@ try
     var animate = !Console.IsOutputRedirected && AnsiConsole.Profile.Capabilities.Ansi
         && AnsiConsole.Profile.Capabilities.Interactive;
     var plan = Scan(cleaner, root, animate);
+    if (plan.SkippedRepositories.Count > 0)
+        Console.WriteLine();
     foreach (var skipped in plan.SkippedRepositories)
-        Console.WriteLine(skipped);
+    {
+        if (animate)
+            AnsiConsole.MarkupLine($"[yellow]SKIP[/] [grey]{Markup.Escape(skipped)}[/]");
+        else
+            Console.WriteLine($"SKIP {skipped}");
+    }
+    if (plan.Errors.Count > 0)
+        Console.WriteLine();
     foreach (var error in plan.Errors)
         Console.Error.WriteLine(error);
+    Console.WriteLine();
     if (plan.Entries.Count == 0)
     {
         Console.WriteLine("No folders to clean.");
@@ -35,7 +45,9 @@ try
     Console.WriteLine("Folders to clean (3 levels; sizes include ignored files in all subfolders):");
     PrintCleanupFolders(plan, animate);
 
+    Console.WriteLine();
     Console.WriteLine($"Estimated disk space savings: {FormatSize(plan.BytesToDelete)}.");
+    Console.WriteLine();
     Console.Write("Delete these folders? (y/n) ");
     if (!string.Equals(Console.ReadLine()?.Trim(), "y", StringComparison.OrdinalIgnoreCase))
     {
@@ -58,20 +70,33 @@ catch (Exception ex) when (ex is IOException or UnauthorizedAccessException
 
 static CleanupPlan Scan(ArtifactCleaner cleaner, string root, bool animate)
 {
+    var folders = 0;
     if (!animate)
-        return cleaner.Scan(root, folder =>
+    {
+        string? lastPhase = null;
+        var plainPlan = cleaner.Scan(root, folder =>
         {
+            folders++;
             if (FolderDepth(root, folder) <= 2)
                 Console.WriteLine($"Scanning: {FormatFolder(root, folder)}");
+        }, (phase, _, _) =>
+        {
+            if (phase != lastPhase)
+            {
+                Console.WriteLine($"{phase}...");
+                lastPhase = phase;
+            }
         });
+        Console.WriteLine($"Scan complete: {folders} folders scanned.");
+        return plainPlan;
+    }
 
-    var folders = 0;
     var plan = AnsiConsole.Status().Spinner(Spinner.Known.Line).Start("Scanning for Git repositories...", context =>
         cleaner.Scan(root, folder =>
         {
             folders++;
             context.Status($"Scanning ({folders} folders): {Markup.Escape(Path.GetRelativePath(root, DisplayFolder(root, folder)))}");
-        }));
+        }, (phase, current, total) => context.Status($"{phase} ({current}/{total})...")));
     Console.WriteLine($"Scan complete: {folders} folders scanned.");
     return plan;
 }

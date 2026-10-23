@@ -36,6 +36,13 @@ the current folder and a folder count. After confirmation, a progress bar tracks
 successfully deleted files and directories against the preview's item count.
 Skipped or failed items do not advance the bar. Animation is cleared before the
 final result; errors and disk space totals are still reported normally.
+After folder discovery, the spinner switches to repository validation and then
+`Calculating results`, with repository counts. These phases query Git and build
+the cleanup plan, including file sizes; they can take time even after the last
+folder has been discovered. Plain output announces each phase once. Skipped
+repositories use a yellow `SKIP` label and gray details in interactive ANSI
+terminals; redirected output keeps a plain `SKIP` label. Blank lines separate the
+scan summary, skipped repositories, cleanup tree, size estimate, and confirmation.
 Redirected output and terminals without interactive ANSI support use plain lines:
 folders in the first three levels are printed as discovery enters them.
 Folders are shown by name only, without trailing separators, with two spaces of

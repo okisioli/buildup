@@ -8,6 +8,7 @@
     <PublishDir>$(MSBuildThisFileDirectory)../../Build/publish/$(RuntimeIdentifier)/</PublishDir>
   </PropertyGroup>
   <ItemGroup>
+    <PackageReference Include="Spectre.Console" />
     <ProjectReference Include="../Buildup.Core/Buildup.Core.csproj" />
   </ItemGroup>
 </Project>

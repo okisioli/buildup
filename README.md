@@ -31,7 +31,13 @@ Linux/macOS executables are named `buildup` without `.exe`.
 
 `--help` prints usage. Unknown arguments return exit code 2;
 cleanup errors return 1 and are printed to standard error. Successful runs return 0.
-Each folder is printed as discovery enters it, so large scans show progress.
+Interactive terminals show a Spectre.Console spinner while scanning, including
+the current folder and a folder count. After confirmation, a progress bar tracks
+successfully deleted files and directories against the preview's item count.
+Skipped or failed items do not advance the bar. Animation is cleared before the
+final result; errors and disk space totals are still reported normally.
+Redirected output and terminals without interactive ANSI support use plain lines:
+each folder is printed as discovery enters it, so large scans show progress.
 Folders are shown by name only, without trailing separators, with two spaces of
 indentation per nested level relative to the directory where the command was run.
 The current directory is shown as `.`. After scanning, cleanup candidates are
@@ -39,7 +45,8 @@ listed without individual files. Folders containing individually ignored
 files are included; only eligible ignored contents are removed from those folders.
 The prompt `Delete these folders? (y/n)` requires `y` (case-insensitive) to proceed.
 Any other response or end of input cancels deletion. Nothing is deleted during scanning.
-During deletion, each affected folder is printed once with a `Removing:` prefix.
+With plain output, each affected folder is printed once during deletion with a
+`Removing:` prefix.
 File sizes are totaled during scanning, and `Estimated disk space savings:` is
 printed before confirmation. Sizes are read again immediately before deletion and
 counted only after successful deletion. A final line reports `Disk space saved:`
@@ -70,5 +77,5 @@ rules during cleanup.
 
 `SRC/Buildup.Core` owns discovery and deletion; `SRC/Buildup.Cli` only handles arguments
 and output. `Directory.Build.props` redirects build and intermediate output into
-`Build/`; `Directory.Packages.props` enables central package management. There are no
-external package dependencies.
+`Build/`; `Directory.Packages.props` enables central package management. The CLI uses
+Spectre.Console for terminal animations; the core has no external package dependencies.

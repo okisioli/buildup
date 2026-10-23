@@ -39,7 +39,13 @@ final result; errors and disk space totals are still reported normally.
 After folder discovery, the spinner switches to repository validation and then
 `Calculating results`, with repository counts. These phases query Git and build
 the cleanup plan, including file sizes; they can take time even after the last
-folder has been discovered. Plain output announces each phase once. Skipped
+folder has been discovered. A second, gray line shows the current repository and
+activity (querying Git, measuring ignored files, or checking artifact folders),
+with eligible file/folder counts and bytes accumulated across the scan. During
+file and folder inspection it also shows the current path. File/folder detail
+updates are limited to ten per second; activity changes appear immediately.
+Plain output announces each phase once and prints
+repository details, with additional updates at most once per second. Skipped
 repositories use a yellow `SKIP` label and gray details in interactive ANSI
 terminals; redirected output keeps a plain `SKIP` label. Blank lines separate the
 scan summary, skipped repositories, cleanup tree, size estimate, and confirmation.
@@ -65,9 +71,14 @@ The folder itself is removed only if it is an eligible empty artifact directory;
 repository roots and preserved files remain. Parent selections include their
 children; selecting the numbered scan root is equivalent to selecting everything.
 `Y` deletes all remaining previewed artifacts, and `N`, Enter, Escape, or end of
-input finishes picking. Interactive ANSI terminals redraw the list in place and
-mark completed folders red with `deleted`; redirected output prints refreshed
-plain lists. Sizes update to the remaining previewed file sizes. Only successful
+input finishes picking. A multiline `Choose how to proceed` prompt lists these
+options and the available folder numbers. Interactive ANSI terminals redraw short
+lists in place and mark completed folders red with `deleted`. Lists too tall for
+the terminal print in full so every number is available in scrollback; redirected
+output prints refreshed plain lists. Disk space saved and deleted file/directory
+counts accumulate across the entire picking session. Saved space appears in cyan
+and deletion status in gray in interactive ANSI terminals.
+Sizes update to the remaining previewed file sizes. Only successful
 deletions mark a folder complete, so failed or changed items stay unmarked and
 can be retried. Git rules are rechecked for every selection, and newly created
 files are never added to the original preview.

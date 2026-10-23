@@ -53,7 +53,7 @@ try
     if (string.Equals(choice, "p", StringComparison.OrdinalIgnoreCase))
     {
         var picked = PickFolders(cleaner, plan, animate);
-        Console.WriteLine($"Disk space saved: {FormatSize(picked.BytesDeleted)}.");
+        PrintSavedSpace(picked.BytesDeleted, animate);
         return plan.Errors.Count == 0 && picked.Errors.Count == 0 ? 0 : 1;
     }
     if (!string.Equals(choice, "y", StringComparison.OrdinalIgnoreCase))
@@ -65,7 +65,7 @@ try
     var result = Delete(cleaner, plan, animate);
     foreach (var error in result.Errors)
         Console.Error.WriteLine(error);
-    Console.WriteLine($"Disk space saved: {FormatSize(result.BytesDeleted)}.");
+    PrintSavedSpace(result.BytesDeleted, animate);
     return plan.Errors.Count == 0 && result.Errors.Count == 0 ? 0 : 1;
 }
 catch (Exception ex) when (ex is IOException or UnauthorizedAccessException
@@ -81,6 +81,8 @@ static CleanupPlan Scan(ArtifactCleaner cleaner, string root, bool animate)
     if (!animate)
     {
         string? lastPhase = null;
+        var detailTimer = System.Diagnostics.Stopwatch.StartNew();
+        var firstDetail = true;
         var plainPlan = cleaner.Scan(root, folder =>
         {
             folders++;
@@ -88,22 +90,35 @@ static CleanupPlan Scan(ArtifactCleaner cleaner, string root, bool animate)
                 Console.WriteLine($"Scanning: {FormatFolder(root, folder)}");
         }, (phase, _, _) =>
         {
+            firstDetail = true;
             if (phase != lastPhase)
             {
                 Console.WriteLine($"{phase}...");
                 lastPhase = phase;
             }
+        }, detail =>
+        {
+            if (!firstDetail && detailTimer.ElapsedMilliseconds < 1000)
+                return;
+            Console.WriteLine($"  {detail}");
+            firstDetail = false;
+            detailTimer.Restart();
         });
         Console.WriteLine($"Scan complete: {folders} folders scanned.");
         return plainPlan;
     }
 
-    var plan = AnsiConsole.Status().Spinner(Spinner.Known.Line).Start("Scanning for Git repositories...", context =>
+    var phaseStatus = "Scanning for Git repositories...";
+    var plan = AnsiConsole.Status().Spinner(Spinner.Known.Line).Start(phaseStatus, context =>
         cleaner.Scan(root, folder =>
         {
             folders++;
             context.Status($"Scanning ({folders} folders): {Markup.Escape(Path.GetRelativePath(root, DisplayFolder(root, folder)))}");
-        }, (phase, current, total) => context.Status($"{phase} ({current}/{total})...")));
+        }, (phase, current, total) =>
+        {
+            phaseStatus = $"{phase} ({current}/{total})...";
+            context.Status(phaseStatus);
+        }, detail => context.Status($"{phaseStatus}\n  [grey]{Markup.Escape(detail)}[/]")));
     Console.WriteLine($"Scan complete: {folders} folders scanned.");
     return plan;
 }
@@ -229,6 +244,14 @@ static CleanupResult PickFolders(ArtifactCleaner cleaner, CleanupPlan plan, bool
     long bytes = 0;
     var status = "Choosing a folder deletes its previewed artifacts, including descendants.";
     var input = "";
+    var deleting = false;
+    var finished = false;
+
+    string Prompt() => "Choose how to proceed\n"
+        + "- [ Y ] Delete all remaining\n"
+        + "- [ N, Enter, Esc ] Abort\n"
+        + $"- [ 1...{rows.Count} ] Delete this folder and its subfolders\n"
+        + "Your choice: ";
 
     Spectre.Console.Rendering.IRenderable Frame()
     {
@@ -245,10 +268,12 @@ static CleanupResult PickFolders(ArtifactCleaner cleaner, CleanupPlan plan, bool
                 : $"{label}  [bold yellow]{FormatSize(row.Bytes)}[/]"));
         }
         lines.Add(new Text(""));
-        lines.Add(new Text($"Disk space saved: {FormatSize(bytes)}."));
-        lines.Add(new Text(status));
+        lines.Add(new Markup($"Disk space saved: [bold cyan]{FormatSize(bytes)}[/]."));
+        lines.Add(new Text($"Deleted {files} files and {directories} directories this session."));
+        lines.Add(new Text(status, deleting ? new Style(Color.Grey) : Style.Plain));
         lines.Add(new Text(""));
-        lines.Add(new Text($"Folder number / Y for all remaining / N to finish (Enter/Esc finishes): {input}"));
+        if (!finished && !deleting)
+            lines.Add(new Text(Prompt() + input));
         return new Rows(lines);
     }
 
@@ -279,6 +304,7 @@ static CleanupResult PickFolders(ArtifactCleaner cleaner, CleanupPlan plan, bool
                 continue;
             }
             status = "Deleting selected artifacts; rechecking Git ignore rules...";
+            deleting = true;
             input = "";
             refresh();
             var removed = 0;
@@ -294,38 +320,60 @@ static CleanupResult PickFolders(ArtifactCleaner cleaner, CleanupPlan plan, bool
             files += result.Files;
             directories += result.Directories;
             bytes += result.BytesDeleted;
+            deleting = false;
             errors.AddRange(result.Errors);
             rows = CleanupFolders(plan, deleted);
-            status = $"Deleted {result.Files} files and {result.Directories} directories."
-                + (rows[0].Remaining > 0 ? " Unmarked items remain; failed or changed items are preserved." : " Cleanup complete.")
-                + (result.Errors.Count > 0 ? $" {result.Errors.Count} errors (reported below)." : "");
+            status = (rows[0].Remaining > 0 ? "Unmarked items remain; failed or changed items are preserved." : "Cleanup complete.")
+                + (errors.Count > 0 ? $" {errors.Count} session errors (reported below)." : "");
         }
         input = "";
+        finished = true;
         refresh();
     }
 
-    // Live rendering redraws the numbered list in place; redirected output keeps a plain transcript.
-    if (interactive && !Console.IsInputRedirected)
-        AnsiConsole.Live(Frame()).AutoClear(false).Start(context =>
+    // A live frame taller than the terminal can hide its first rows. Long lists use
+    // ordinary output so every numbered folder remains available in scrollback.
+    var width = Math.Max(1, AnsiConsole.Profile.Width);
+    var listHeight = rows.Sum(row => 1 + (FormatFolder(plan.RootPath, row.Path).Length + 40) / width);
+    if (interactive && !Console.IsInputRedirected && listHeight + 18 < AnsiConsole.Profile.Height)
+        AnsiConsole.Live(Frame()).AutoClear(false).Overflow(VerticalOverflow.Visible).Start(context =>
             Run(() => { context.UpdateTarget(Frame()); context.Refresh(); }, true));
     else
         Run(() =>
         {
             Console.WriteLine();
+            if (interactive)
+            {
+                AnsiConsole.Write(Frame());
+                Console.WriteLine();
+                return;
+            }
+            Console.WriteLine("Pick folders to clean (numbers stay the same):");
             for (var i = 0; i < rows.Count; i++)
             {
                 var row = rows[i];
                 Console.WriteLine($"{i + 1}. {FormatFolder(plan.RootPath, row.Path)}  "
                     + (row.Remaining == 0 ? "— deleted" : FormatSize(row.Bytes)));
             }
+            PrintSavedSpace(bytes, false);
+            Console.WriteLine($"Deleted {files} files and {directories} directories this session.");
             Console.WriteLine(status);
-            Console.Write("Folder number / Y for all remaining / N to finish (Enter/Esc finishes): ");
+            if (!finished && !deleting)
+                Console.Write(Prompt());
         }, false);
 
     Console.WriteLine();
     foreach (var error in errors)
         Console.Error.WriteLine(error);
     return new CleanupResult(files, directories, bytes, errors.AsReadOnly());
+}
+
+static void PrintSavedSpace(long bytes, bool highlight)
+{
+    if (highlight)
+        AnsiConsole.MarkupLine($"Disk space saved: [bold cyan]{FormatSize(bytes)}[/].");
+    else
+        Console.WriteLine($"Disk space saved: {FormatSize(bytes)}.");
 }
 
 static string[] FolderParts(string root, string folder) => Path.GetRelativePath(root, folder)

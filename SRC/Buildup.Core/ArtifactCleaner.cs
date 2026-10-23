@@ -127,11 +127,14 @@ public sealed class ArtifactCleaner
         var reported = new HashSet<string>(PathComparer);
         foreach (var repository in plan.Repositories.Order(PathComparer))
         {
+            var entries = plan.Entries.Where(entry => IsWithin(entry.Path, repository)).ToArray();
+            if (entries.Length == 0)
+                continue;
             try
             {
                 // Recheck ignore rules and tracked status after confirmation. Only approved paths are eligible.
                 var ignored = new HashSet<string>(IgnoredPaths(repository, false), PathComparer);
-                foreach (var entry in plan.Entries.Where(entry => IsWithin(entry.Path, repository)))
+                foreach (var entry in entries)
                 {
                     try
                     {

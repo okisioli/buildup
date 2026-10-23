@@ -56,8 +56,21 @@ descendants, including folders hidden by the display limit. Parent totals includ
 their child totals; do not add the rows together. Sizes appear in bold yellow in
 interactive ANSI terminals. Folders containing individually ignored files are
 included; only eligible ignored contents are removed from those folders.
-The prompt `Delete these folders? (y/n)` requires `y` (case-insensitive) to proceed.
-Any other response or end of input cancels deletion. Nothing is deleted during scanning.
+The deletion prompt accepts `Y` to delete all previewed artifacts, `N` to cancel,
+or `P` to pick folders (case-insensitive, followed by Enter). Empty input, Escape,
+unrecognized input, or end of input cancels deletion. Nothing is deleted during scanning.
+In pick mode, every displayed folder receives a stable number. Type a number and
+press Enter to delete that folder's previewed artifacts, including all descendants.
+The folder itself is removed only if it is an eligible empty artifact directory;
+repository roots and preserved files remain. Parent selections include their
+children; selecting the numbered scan root is equivalent to selecting everything.
+`Y` deletes all remaining previewed artifacts, and `N`, Enter, Escape, or end of
+input finishes picking. Interactive ANSI terminals redraw the list in place and
+mark completed folders red with `deleted`; redirected output prints refreshed
+plain lists. Sizes update to the remaining previewed file sizes. Only successful
+deletions mark a folder complete, so failed or changed items stay unmarked and
+can be retried. Git rules are rechecked for every selection, and newly created
+files are never added to the original preview.
 With plain output, each affected folder is grouped at the same display depth and
 printed once during deletion with a `Removing:` prefix.
 File sizes are totaled during scanning, and `Estimated disk space savings:` is

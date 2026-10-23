@@ -95,7 +95,8 @@ public sealed class ArtifactCleaner
         return new CleanupPlan(root, repositories, metadata, entries.AsReadOnly(), bytesToDelete, errors.AsReadOnly());
     }
 
-    public CleanupResult Delete(CleanupPlan plan, Action<string>? onRemoving = null)
+    public CleanupResult Delete(CleanupPlan plan, Action<string>? onRemoving = null,
+        Action<CleanupEntry>? onDeleted = null)
     {
         var errors = new List<string>();
         var files = 0;
@@ -123,6 +124,7 @@ public sealed class ArtifactCleaner
                             // Never recursively delete: new or preserved files keep the folder alive.
                             Directory.Delete(entry.Path);
                             directories++;
+                            onDeleted?.Invoke(entry);
                         }
                         else if (ignored.Contains(entry.Path) && File.Exists(entry.Path))
                         {
@@ -133,6 +135,7 @@ public sealed class ArtifactCleaner
                             File.Delete(entry.Path);
                             bytesDeleted += size;
                             files++;
+                            onDeleted?.Invoke(entry);
                         }
                     }
                     catch (Exception ex) when (IsFileSystemError(ex))

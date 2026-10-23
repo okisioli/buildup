@@ -37,16 +37,22 @@ successfully deleted files and directories against the preview's item count.
 Skipped or failed items do not advance the bar. Animation is cleared before the
 final result; errors and disk space totals are still reported normally.
 Redirected output and terminals without interactive ANSI support use plain lines:
-each folder is printed as discovery enters it, so large scans show progress.
+folders in the first three levels are printed as discovery enters them.
 Folders are shown by name only, without trailing separators, with two spaces of
 indentation per nested level relative to the directory where the command was run.
-The current directory is shown as `.`. After scanning, cleanup candidates are
-listed without individual files. Folders containing individually ignored
-files are included; only eligible ignored contents are removed from those folders.
+The current directory is shown by name and counts as the first level. Displayed
+folder trees stop at its grandchildren; scanning and cleanup still include every
+level, and the full cleanup plan retains every eligible path. After scanning,
+cleanup candidates are grouped into this three-level tree without individual files.
+Each row shows the total size of eligible ignored files in that folder and all its
+descendants, including folders hidden by the display limit. Parent totals include
+their child totals; do not add the rows together. Sizes appear in bold yellow in
+interactive ANSI terminals. Folders containing individually ignored files are
+included; only eligible ignored contents are removed from those folders.
 The prompt `Delete these folders? (y/n)` requires `y` (case-insensitive) to proceed.
 Any other response or end of input cancels deletion. Nothing is deleted during scanning.
-With plain output, each affected folder is printed once during deletion with a
-`Removing:` prefix.
+With plain output, each affected folder is grouped at the same display depth and
+printed once during deletion with a `Removing:` prefix.
 File sizes are totaled during scanning, and `Estimated disk space savings:` is
 printed before confirmation. Sizes are read again immediately before deletion and
 counted only after successful deletion. A final line reports `Disk space saved:`

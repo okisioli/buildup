@@ -32,11 +32,8 @@ try
         return plan.Errors.Count == 0 ? 0 : 1;
     }
 
-    Console.WriteLine("Folders to clean (including folders containing individual ignored files):");
-    var comparer = OperatingSystem.IsWindows() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal;
-    foreach (var folder in plan.Entries.Select(entry => entry.IsDirectory ? entry.Path : Path.GetDirectoryName(entry.Path)!)
-        .Distinct(comparer).Order(comparer))
-        Console.WriteLine(FormatFolder(root, folder));
+    Console.WriteLine("Folders to clean (3 levels; sizes include ignored files in all subfolders):");
+    PrintCleanupFolders(plan, animate);
 
     Console.WriteLine($"Estimated disk space savings: {FormatSize(plan.BytesToDelete)}.");
     Console.Write("Delete these folders? (y/n) ");
@@ -62,14 +59,18 @@ catch (Exception ex) when (ex is IOException or UnauthorizedAccessException
 static CleanupPlan Scan(ArtifactCleaner cleaner, string root, bool animate)
 {
     if (!animate)
-        return cleaner.Scan(root, folder => Console.WriteLine($"Scanning: {FormatFolder(root, folder)}"));
+        return cleaner.Scan(root, folder =>
+        {
+            if (FolderDepth(root, folder) <= 2)
+                Console.WriteLine($"Scanning: {FormatFolder(root, folder)}");
+        });
 
     var folders = 0;
     var plan = AnsiConsole.Status().Spinner(Spinner.Known.Line).Start("Scanning for Git repositories...", context =>
         cleaner.Scan(root, folder =>
         {
             folders++;
-            context.Status($"Scanning ({folders} folders): {Markup.Escape(Path.GetRelativePath(root, folder))}");
+            context.Status($"Scanning ({folders} folders): {Markup.Escape(Path.GetRelativePath(root, DisplayFolder(root, folder)))}");
         }));
     Console.WriteLine($"Scan complete: {folders} folders scanned.");
     return plan;
@@ -78,7 +79,16 @@ static CleanupPlan Scan(ArtifactCleaner cleaner, string root, bool animate)
 static CleanupResult Delete(ArtifactCleaner cleaner, CleanupPlan plan, bool animate)
 {
     if (!animate)
-        return cleaner.Delete(plan, folder => Console.WriteLine($"Removing: {FormatFolder(plan.RootPath, folder)}"));
+    {
+        var reported = new HashSet<string>(OperatingSystem.IsWindows()
+            ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal);
+        return cleaner.Delete(plan, folder =>
+        {
+            var displayed = DisplayFolder(plan.RootPath, folder);
+            if (reported.Add(displayed))
+                Console.WriteLine($"Removing: {FormatFolder(plan.RootPath, displayed)}");
+        });
+    }
 
     var result = AnsiConsole.Progress().AutoClear(true).Columns(
         new SpinnerColumn(), new TaskDescriptionColumn(), new ProgressBarColumn(), new PercentageColumn())
@@ -87,7 +97,7 @@ static CleanupResult Delete(ArtifactCleaner cleaner, CleanupPlan plan, bool anim
             var task = context.AddTask("Revalidating cleanup...", maxValue: plan.Entries.Count);
             var deleted = 0;
             var cleanupResult = cleaner.Delete(plan,
-                folder => task.Description = $"Removing: {Markup.Escape(Path.GetRelativePath(plan.RootPath, folder))}",
+                folder => task.Description = $"Removing: {Markup.Escape(Path.GetRelativePath(plan.RootPath, DisplayFolder(plan.RootPath, folder)))}",
                 _ =>
                 {
                     deleted++;
@@ -101,13 +111,50 @@ static CleanupResult Delete(ArtifactCleaner cleaner, CleanupPlan plan, bool anim
     return result;
 }
 
-static string FormatFolder(string root, string folder)
+static void PrintCleanupFolders(CleanupPlan plan, bool highlight)
 {
-    var relative = Path.GetRelativePath(root, folder);
-    var depth = relative.Count(character => character == Path.DirectorySeparatorChar
-        || character == Path.AltDirectorySeparatorChar);
-    return new string(' ', depth * 2) + Path.GetFileName(relative);
+    var comparer = OperatingSystem.IsWindows() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal;
+    var sizes = new Dictionary<string, long>(comparer);
+    foreach (var entry in plan.Entries)
+    {
+        var folder = DisplayFolder(plan.RootPath, entry.IsDirectory ? entry.Path : Path.GetDirectoryName(entry.Path)!);
+        while (true)
+        {
+            sizes[folder] = sizes.GetValueOrDefault(folder) + entry.Bytes;
+            if (comparer.Equals(folder, plan.RootPath))
+                break;
+            folder = Path.GetDirectoryName(folder)!;
+        }
+    }
+
+    var children = sizes.Keys.Where(folder => !comparer.Equals(folder, plan.RootPath))
+        .ToLookup(folder => Path.GetDirectoryName(folder)!, comparer);
+    WriteFolder(plan.RootPath);
+
+    void WriteFolder(string folder)
+    {
+        var label = FormatFolder(plan.RootPath, folder);
+        var size = FormatSize(sizes[folder]);
+        if (highlight)
+            AnsiConsole.MarkupLine($"{Markup.Escape(label)}  [bold yellow]{size}[/]");
+        else
+            Console.WriteLine($"{label}  {size}");
+        foreach (var child in children[folder].Order(comparer))
+            WriteFolder(child);
+    }
 }
+
+static string[] FolderParts(string root, string folder) => Path.GetRelativePath(root, folder)
+    .Split([Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar], StringSplitOptions.RemoveEmptyEntries);
+
+static int FolderDepth(string root, string folder) =>
+    Path.GetRelativePath(root, folder) == "." ? 0 : FolderParts(root, folder).Length;
+
+static string DisplayFolder(string root, string folder) => FolderDepth(root, folder) <= 2
+    ? folder : Path.Combine(root, Path.Combine(FolderParts(root, folder).Take(2).ToArray()));
+
+static string FormatFolder(string root, string folder) =>
+    new string(' ', FolderDepth(root, folder) * 2) + new DirectoryInfo(folder).Name;
 
 static string FormatSize(long bytes)
 {

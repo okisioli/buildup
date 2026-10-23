@@ -16,25 +16,41 @@ public sealed class ArtifactCleaner
             throw new ArgumentException("The scan root must not be a symbolic link or junction.", nameof(rootPath));
 
         var errors = new List<string>();
+        var skippedRepositories = new List<string>();
+        var candidates = new HashSet<string>(PathComparer);
         var repositories = new HashSet<string>(PathComparer);
         var metadata = new HashSet<string>(PathComparer);
         // Only explicit working-tree roots at or below the scan root are eligible.
         // In particular, an ancestor repository must not turn Downloads into a cleanup target.
-        Discover(root, repositories, metadata, errors, onScanning);
-        foreach (var repository in repositories)
+        Discover(root, candidates, metadata, errors, onScanning);
+        foreach (var repository in candidates)
         {
             var topLevel = Git(repository, "rev-parse", "--show-toplevel");
             if (topLevel.ExitCode != 0 || !PathComparer.Equals(repository,
                 Path.TrimEndingDirectorySeparator(Path.GetFullPath(topLevel.Output.TrimEnd('\r', '\n')))))
-                throw new InvalidOperationException($"Not a Git working-tree root: {repository}");
+            {
+                // Keep rejected roots protected even when an ancestor repository ignores them.
+                metadata.Add(repository);
+                var reason = topLevel.ExitCode != 0 ? topLevel.Error.Trim() : "not a Git working-tree root";
+                skippedRepositories.Add($"Skipping folder {repository}: {reason}");
+                continue;
+            }
 
+            var valid = true;
             foreach (var option in new[] { "--absolute-git-dir", "--git-common-dir" })
             {
                 var location = Git(repository, "rev-parse", "--path-format=absolute", option);
                 if (location.ExitCode != 0)
-                    throw new InvalidOperationException(location.Error.Trim());
+                {
+                    metadata.Add(repository);
+                    skippedRepositories.Add($"Skipping folder {repository}: {location.Error.Trim()}");
+                    valid = false;
+                    break;
+                }
                 metadata.Add(Path.TrimEndingDirectorySeparator(Path.GetFullPath(location.Output.TrimEnd('\r', '\n'))));
             }
+            if (valid)
+                repositories.Add(repository);
         }
         var entries = new List<CleanupEntry>();
         long bytesToDelete = 0;
@@ -92,7 +108,8 @@ public sealed class ArtifactCleaner
             }
         }
 
-        return new CleanupPlan(root, repositories, metadata, entries.AsReadOnly(), bytesToDelete, errors.AsReadOnly());
+        return new CleanupPlan(root, repositories, metadata, entries.AsReadOnly(), bytesToDelete,
+            errors.AsReadOnly(), skippedRepositories.AsReadOnly());
     }
 
     public CleanupResult Delete(CleanupPlan plan, Action<string>? onRemoving = null,

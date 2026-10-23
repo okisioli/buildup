@@ -22,6 +22,8 @@ try
     var animate = !Console.IsOutputRedirected && AnsiConsole.Profile.Capabilities.Ansi
         && AnsiConsole.Profile.Capabilities.Interactive;
     var plan = Scan(cleaner, root, animate);
+    foreach (var skipped in plan.SkippedRepositories)
+        Console.WriteLine(skipped);
     foreach (var error in plan.Errors)
         Console.Error.WriteLine(error);
     if (plan.Entries.Count == 0)

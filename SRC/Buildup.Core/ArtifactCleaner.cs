@@ -72,7 +72,7 @@ public sealed class ArtifactCleaner
                             continue;
                         var size = new FileInfo(path).Length;
                         removed.Add(path);
-                        entries.Add(new CleanupEntry(path, false));
+                        entries.Add(new CleanupEntry(path, false, size));
                         bytesToDelete += size;
                     }
                     catch (Exception ex) when (IsFileSystemError(ex))

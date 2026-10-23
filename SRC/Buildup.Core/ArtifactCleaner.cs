@@ -7,7 +7,8 @@ public sealed class ArtifactCleaner
     private static readonly StringComparer PathComparer = OperatingSystem.IsWindows()
         ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal;
 
-    public CleanupPlan Scan(string rootPath, Action<string>? onScanning = null)
+    public CleanupPlan Scan(string rootPath, Action<string>? onScanning = null,
+        Action<string, int, int>? onProgress = null)
     {
         var root = Path.TrimEndingDirectorySeparator(Path.GetFullPath(rootPath));
         if (!Directory.Exists(root))
@@ -23,8 +24,10 @@ public sealed class ArtifactCleaner
         // Only explicit working-tree roots at or below the scan root are eligible.
         // In particular, an ancestor repository must not turn Downloads into a cleanup target.
         Discover(root, candidates, metadata, errors, onScanning);
+        var validated = 0;
         foreach (var repository in candidates)
         {
+            onProgress?.Invoke("Validating repositories", ++validated, candidates.Count);
             var topLevel = Git(repository, "rev-parse", "--show-toplevel");
             if (topLevel.ExitCode != 0 || !PathComparer.Equals(repository,
                 Path.TrimEndingDirectorySeparator(Path.GetFullPath(topLevel.Output.TrimEnd('\r', '\n')))))
@@ -54,8 +57,10 @@ public sealed class ArtifactCleaner
         }
         var entries = new List<CleanupEntry>();
         long bytesToDelete = 0;
+        var calculated = 0;
         foreach (var repository in repositories.Order(PathComparer))
         {
+            onProgress?.Invoke("Calculating results", ++calculated, repositories.Count);
             try
             {
                 // Git supplies untracked ignored paths, so tracked files are never candidates.

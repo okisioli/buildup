@@ -39,7 +39,7 @@ public sealed class ArtifactCleaner
             if (name == ".")
                 name = new DirectoryInfo(root).Name;
             var location = path is null ? "" : $": {Path.GetRelativePath(repository, path)}";
-            onDetail($"{name} — {activity}{location} | {files:N0} files, {directories:N0} folders eligible; {bytesToDelete:N0} bytes");
+            onDetail($"{name}\n  {activity}{location}\n  {files:N0} files, {directories:N0} folders eligible; {bytesToDelete:N0} bytes");
         }
 
         var validated = 0;
@@ -190,7 +190,7 @@ public sealed class ArtifactCleaner
                             File.Delete(entry.Path);
                             bytesDeleted += size;
                             files++;
-                            onDeleted?.Invoke(entry);
+                            onDeleted?.Invoke(entry with { Bytes = size });
                         }
                     }
                     catch (Exception ex) when (IsFileSystemError(ex))

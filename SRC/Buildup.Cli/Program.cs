@@ -4,8 +4,8 @@ using Spectre.Console;
 if (args.Length == 1 && args[0] is "--help" or "-h")
 {
     Console.WriteLine("Usage: buildup");
-    Console.WriteLine("Deletes ignored files only in Git repositories rooted at or below the current directory.");
-    Console.WriteLine("Lists scanned folders and cleanup folders, then asks for confirmation before deleting.");
+    Console.WriteLine("Deletes ignored files in the current or nearest containing Git repository, or repositories below the current directory.");
+    Console.WriteLine("Previews cleanup and asks for confirmation; folder picking is available when scanning outside a repository.");
     return 0;
 }
 
@@ -18,7 +18,8 @@ if (args.Length > 0)
 try
 {
     var cleaner = new ArtifactCleaner();
-    var root = Directory.GetCurrentDirectory();
+    var currentDirectory = Directory.GetCurrentDirectory();
+    var root = FindContainingRepository(currentDirectory) ?? currentDirectory;
     var animate = !Console.IsOutputRedirected && AnsiConsole.Profile.Capabilities.Ansi
         && AnsiConsole.Profile.Capabilities.Interactive;
     var plan = Scan(cleaner, root, animate);
@@ -36,21 +37,32 @@ try
     foreach (var error in plan.Errors)
         Console.Error.WriteLine(error);
     Console.WriteLine();
+    var comparer = OperatingSystem.IsWindows() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal;
+    var singleRepository = plan.RepositoryRoots.Contains(plan.RootPath, comparer);
+    if (singleRepository)
+        Console.WriteLine(comparer.Equals(root, currentDirectory)
+            ? $"This is a Git repository: {root}"
+            : $"Using containing Git repository: {root}");
     if (plan.Entries.Count == 0)
     {
         Console.WriteLine("No folders to clean.");
         return plan.Errors.Count == 0 ? 0 : 1;
     }
 
-    Console.WriteLine("Repositories to clean (sizes include ignored files in all subfolders):");
-    PrintCleanupFolders(plan, animate);
+    if (!singleRepository)
+    {
+        Console.WriteLine("Repositories to clean (sizes include ignored files in all subfolders):");
+        PrintCleanupFolders(plan, animate);
+    }
 
     Console.WriteLine();
     Console.WriteLine($"Estimated disk space savings: {FormatSize(plan.BytesToDelete)}.");
     Console.WriteLine();
-    Console.Write("Delete these folders? [Y] all / [N] cancel / [P] pick (Enter/Esc cancels): ");
+    Console.Write(singleRepository
+        ? "Delete this repository's ignored files and empty artifact folders? [Y] delete / [N] cancel (Enter/Esc cancels): "
+        : "Delete these folders? [Y] all / [N] cancel / [P] pick (Enter/Esc cancels): ");
     var choice = ReadChoice();
-    if (string.Equals(choice, "p", StringComparison.OrdinalIgnoreCase))
+    if (!singleRepository && string.Equals(choice, "p", StringComparison.OrdinalIgnoreCase))
     {
         var picked = PickFolders(cleaner, plan, animate);
         PrintSavedSpace(picked.BytesDeleted, animate);
@@ -73,6 +85,20 @@ catch (Exception ex) when (ex is IOException or UnauthorizedAccessException
 {
     Console.Error.WriteLine(ex.Message);
     return 1;
+}
+
+static string? FindContainingRepository(string path)
+{
+    for (DirectoryInfo? folder = new(path); folder is not null; folder = folder.Parent)
+    {
+        // Do not widen cleanup scope across symbolic links or junctions.
+        if ((folder.Attributes & FileAttributes.ReparsePoint) != 0)
+            return null;
+        if (File.Exists(Path.Combine(folder.FullName, ".git"))
+            || Directory.Exists(Path.Combine(folder.FullName, ".git")))
+            return folder.FullName;
+    }
+    return null;
 }
 
 static CleanupPlan Scan(ArtifactCleaner cleaner, string root, bool animate)

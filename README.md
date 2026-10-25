@@ -2,6 +2,8 @@
 
 A small .NET 10 command-line utility that recursively finds Git working trees under
 the current directory and deletes their ignored files and empty artifact directories.
+When run inside a repository, it cleans that entire repository instead, locating
+the nearest containing repository when launched from a subfolder.
 Git must be installed and available on `PATH`.
 
 ```powershell
@@ -53,7 +55,7 @@ Redirected output and terminals without interactive ANSI support use plain lines
 folders are printed as discovery enters them, stopping display at each repository root.
 Folders are shown by name only, without trailing separators, with two spaces of
 indentation per nested level relative to the directory where the command was run.
-The launch directory is omitted from the tree unless it is itself a repository.
+The launch directory is omitted from the tree.
 There is no depth limit: intermediate folders are shown until the first Git
 repository on each path, and repository contents (such as `bin`, `obj`, and nested
 repositories) are not expanded in the preview. Scanning and cleanup still include
@@ -64,7 +66,11 @@ descendants, including contents hidden beneath repository roots. Parent totals i
 their child totals; do not add the rows together. Sizes appear in bold yellow in
 interactive ANSI terminals. Folders containing individually ignored files are
 included; only eligible ignored contents are removed from those folders.
-The deletion prompt accepts `Y` to delete all previewed artifacts, `N` to cancel,
+When the scan root is a valid Git repository, the app identifies it by its full
+path and shows the size estimate and a `Y`/`N` confirmation, without a folder tree
+or folder picker. `P` is not accepted in this mode. From a repository subfolder,
+the message explicitly identifies the containing repository being cleaned.
+When scanning outside a repository, the deletion prompt accepts `Y` to delete all previewed artifacts, `N` to cancel,
 or `P` to pick folders (case-insensitive, followed by Enter). Empty input, Escape,
 unrecognized input, or end of input cancels deletion. Nothing is deleted during scanning.
 In pick mode, every displayed folder receives a stable number. Type a number and
@@ -101,11 +107,14 @@ are preserved even when they match ignore patterns.
 
 Nested repositories, worktrees, and initialized submodules are handled separately.
 Git metadata, bare repositories, symbolic links, and junctions are left alone.
-Only repository roots found at or below the current directory are eligible. Running
-in Downloads, Photos, or any folder without repositories deletes nothing, even if it
-contains `.gitignore` files or is inside an ancestor repository. To clean a project,
-run from its repository root or a parent folder containing it. Running from an
-ordinary project subdirectory only cleans repositories nested beneath that directory.
+The app checks the current directory and then each parent up to the filesystem
+root for the nearest `.git` directory or file (including worktrees). If found,
+that directory becomes the scan root, including its nested repositories; sibling
+repositories outside it are not included. Upward lookup stops at symbolic links
+or junctions and never bypasses a rejected `.git` marker to choose a higher repository.
+If no containing repository is found, only repositories at or below the launch
+directory are eligible. A folder with no containing or descendant repositories
+deletes nothing, even if it contains `.gitignore` files.
 Each discovered `.git` marker is validated with Git before any cleanup starts.
 Folders that Git rejects (including invalid repositories or repositories with dubious
 ownership) are skipped without failing the run. Their paths and Git's reason are

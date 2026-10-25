@@ -41,8 +41,9 @@ with an ASCII progress bar below them. The bar counts completed repositories;
 the counter identifies the repository currently being processed. The current folder
 appears in gray on its own line, followed by the operation and eligible item/byte
 totals on separate lines. Detail updates are limited to ten per second; activity
-changes appear immediately. Scan rendering and styles live in
-`SRC/Buildup.Cli/ScanProgressColumn.cs`; scan callbacks are wired in `Program.cs`.
+changes appear immediately. Scan rendering lives in
+`SRC/Buildup.Cli/ScanProgressColumn.cs`, style presets in `Constants.cs`, and
+scan callbacks are wired in `Program.cs`.
 Plain output announces each phase once and prints
 repository details, with additional updates at most once per second. Skipped
 repositories use a yellow `SKIP` label and gray details in interactive ANSI
@@ -67,7 +68,10 @@ When launched inside a repository, the app identifies that repository by its ful
 path and displays one cleanup row. Otherwise, the picker shows the folder hierarchy.
 Use Up/Down to select a row, Delete to prepare cleanup, and Enter to confirm.
 Moving Up/Down or pressing Esc cancels a pending confirmation; Esc otherwise exits.
-Pending rows turn orange; completed folder names turn red with the actual saved
+During confirmation, the selected folder has white text on a red background,
+its visible descendant names keep the default foreground, and sizes for the selected
+folder and its descendants turn cyan. Other rows keep their normal colors. The confirmation
+message is vivid red. Completed folder names turn red with the actual saved
 amount in cyan. Cleanup includes descendants but preserves repository roots and
 noneligible files. Parent saved amounts include their children; do not add rows together.
 Failed or changed items remain available for retry. Git rules are rechecked for
@@ -114,3 +118,7 @@ rules during cleanup.
 and output. `Directory.Build.props` redirects build and intermediate output into
 `Build/`; `Directory.Packages.props` enables central package management. The CLI uses
 Spectre.Console for terminal animations; the core has no external package dependencies.
+
+Terminal color choices live in `SRC/Buildup.Cli/Constants.cs` as semantic style presets,
+with foreground, background, and optional decorations. Output uses Spectre's
+`Text` and `Paragraph` renderables directly with these `Style` values.

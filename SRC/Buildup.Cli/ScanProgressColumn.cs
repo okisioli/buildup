@@ -19,10 +19,13 @@ internal sealed class ScanProgressColumn : ProgressColumn
         {
             // Explicit ASCII glyphs keep the bar visible even without terminal colors.
             var filled = (int)(BarWidth * task.Percentage / 100);
-            lines.Add(new Markup($"[[[cyan]{new string('#', filled)}[/][grey]{new string('-', BarWidth - filled)}[/]]] {task.Percentage:0}%"));
+            lines.Add(new Paragraph("[")
+                .Append(new string('#', filled), Constants.ProgressFilled)
+                .Append(new string('-', BarWidth - filled), Constants.ProgressRemaining)
+                .Append($"] {task.Percentage:0}%"));
         }
         if (!string.IsNullOrEmpty(Detail))
-            lines.Add(new Text(Detail, new Style(Color.Grey)));
+            lines.Add(new Text(Detail, Constants.ScanDetail));
         return new Rows(lines);
     }
 }

@@ -8,6 +8,7 @@ public sealed class CleanupPlan
     {
         RootPath = rootPath;
         Repositories = repositories;
+        RepositoryRoots = Array.AsReadOnly(repositories.OrderBy(path => path.Length).ToArray());
         Metadata = metadata;
         Entries = entries;
         BytesToDelete = bytesToDelete;
@@ -16,6 +17,7 @@ public sealed class CleanupPlan
     }
 
     public string RootPath { get; }
+    public IReadOnlyList<string> RepositoryRoots { get; }
     public IReadOnlyList<CleanupEntry> Entries { get; }
     public long BytesToDelete { get; }
     public IReadOnlyList<string> Errors { get; }

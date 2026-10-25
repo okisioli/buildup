@@ -50,15 +50,17 @@ repositories use a yellow `SKIP` label and gray details in interactive ANSI
 terminals; redirected output keeps a plain `SKIP` label. Blank lines separate the
 scan summary, skipped repositories, cleanup tree, size estimate, and confirmation.
 Redirected output and terminals without interactive ANSI support use plain lines:
-folders in the first three levels are printed as discovery enters them.
+folders are printed as discovery enters them, stopping display at each repository root.
 Folders are shown by name only, without trailing separators, with two spaces of
 indentation per nested level relative to the directory where the command was run.
-The current directory is shown by name and counts as the first level. Displayed
-folder trees stop at its grandchildren; scanning and cleanup still include every
-level, and the full cleanup plan retains every eligible path. After scanning,
-cleanup candidates are grouped into this three-level tree without individual files.
+The launch directory is omitted from the tree unless it is itself a repository.
+There is no depth limit: intermediate folders are shown until the first Git
+repository on each path, and repository contents (such as `bin`, `obj`, and nested
+repositories) are not expanded in the preview. Scanning and cleanup still include
+every level, and the full cleanup plan retains every eligible path. Only branches
+containing cleanup candidates appear in the preview.
 Each row shows the total size of eligible ignored files in that folder and all its
-descendants, including folders hidden by the display limit. Parent totals include
+descendants, including contents hidden beneath repository roots. Parent totals include
 their child totals; do not add the rows together. Sizes appear in bold yellow in
 interactive ANSI terminals. Folders containing individually ignored files are
 included; only eligible ignored contents are removed from those folders.
@@ -69,7 +71,7 @@ In pick mode, every displayed folder receives a stable number. Type a number and
 press Enter to delete that folder's previewed artifacts, including all descendants.
 The folder itself is removed only if it is an eligible empty artifact directory;
 repository roots and preserved files remain. Parent selections include their
-children; selecting the numbered scan root is equivalent to selecting everything.
+children; selecting a repository includes its previewed artifacts and nested repositories.
 `Y` deletes all remaining previewed artifacts, and `N`, Enter, Escape, or end of
 input finishes picking. A multiline `Choose how to proceed` prompt lists these
 options and the available folder numbers. Interactive ANSI terminals redraw short
@@ -82,7 +84,7 @@ Sizes update to the remaining previewed file sizes. Only successful
 deletions mark a folder complete, so failed or changed items stay unmarked and
 can be retried. Git rules are rechecked for every selection, and newly created
 files are never added to the original preview.
-With plain output, each affected folder is grouped at the same display depth and
+With plain output, each affected folder is grouped at its repository boundary and
 printed once during deletion with a `Removing:` prefix.
 File sizes are totaled during scanning, and `Estimated disk space savings:` is
 printed before confirmation. Sizes are read again immediately before deletion and

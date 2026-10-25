@@ -42,7 +42,7 @@ try
         return plan.Errors.Count == 0 ? 0 : 1;
     }
 
-    Console.WriteLine("Folders to clean (3 levels; sizes include ignored files in all subfolders):");
+    Console.WriteLine("Repositories to clean (sizes include ignored files in all subfolders):");
     PrintCleanupFolders(plan, animate);
 
     Console.WriteLine();
@@ -78,6 +78,18 @@ catch (Exception ex) when (ex is IOException or UnauthorizedAccessException
 static CleanupPlan Scan(ArtifactCleaner cleaner, string root, bool animate)
 {
     var folders = 0;
+    var repositoryBorders = new List<string>();
+
+    string ScanFolder(string folder)
+    {
+        var border = repositoryBorders.FirstOrDefault(repository => IsAtOrBelow(folder, repository));
+        if (border is not null)
+            return border;
+        if (File.Exists(Path.Combine(folder, ".git")) || Directory.Exists(Path.Combine(folder, ".git")))
+            repositoryBorders.Add(folder);
+        return folder;
+    }
+
     if (!animate)
     {
         string? lastPhase = null;
@@ -86,7 +98,7 @@ static CleanupPlan Scan(ArtifactCleaner cleaner, string root, bool animate)
         var plainPlan = cleaner.Scan(root, folder =>
         {
             folders++;
-            if (FolderDepth(root, folder) <= 2)
+            if (ScanFolder(folder) == folder && folder != root)
                 Console.WriteLine($"Scanning: {FormatFolder(root, folder)}");
         }, (phase, _, _) =>
         {
@@ -113,7 +125,7 @@ static CleanupPlan Scan(ArtifactCleaner cleaner, string root, bool animate)
         cleaner.Scan(root, folder =>
         {
             folders++;
-            context.Status($"Scanning ({folders} folders): {Markup.Escape(Path.GetRelativePath(root, DisplayFolder(root, folder)))}");
+            context.Status($"Scanning ({folders} folders): {Markup.Escape(Path.GetRelativePath(root, ScanFolder(folder)))}");
         }, (phase, current, total) =>
         {
             phaseStatus = $"{phase} ({current}/{total})...";
@@ -131,7 +143,7 @@ static CleanupResult Delete(ArtifactCleaner cleaner, CleanupPlan plan, bool anim
             ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal);
         return cleaner.Delete(plan, folder =>
         {
-            var displayed = DisplayFolder(plan.RootPath, folder);
+            var displayed = DisplayFolder(plan, folder);
             if (reported.Add(displayed))
                 Console.WriteLine($"Removing: {FormatFolder(plan.RootPath, displayed)}");
         });
@@ -144,7 +156,7 @@ static CleanupResult Delete(ArtifactCleaner cleaner, CleanupPlan plan, bool anim
             var task = context.AddTask("Revalidating cleanup...", maxValue: plan.Entries.Count);
             var deleted = 0;
             var cleanupResult = cleaner.Delete(plan,
-                folder => task.Description = $"Removing: {Markup.Escape(Path.GetRelativePath(plan.RootPath, DisplayFolder(plan.RootPath, folder)))}",
+                folder => task.Description = $"Removing: {Markup.Escape(Path.GetRelativePath(plan.RootPath, DisplayFolder(plan, folder)))}",
                 _ =>
                 {
                     deleted++;
@@ -165,7 +177,7 @@ static List<(string Path, long Bytes, int Remaining)> CleanupFolders(CleanupPlan
     var sizes = new Dictionary<string, (long Bytes, int Remaining)>(comparer);
     foreach (var entry in plan.Entries)
     {
-        var folder = DisplayFolder(plan.RootPath, entry.IsDirectory ? entry.Path : Path.GetDirectoryName(entry.Path)!);
+        var folder = DisplayFolder(plan, entry.IsDirectory ? entry.Path : Path.GetDirectoryName(entry.Path)!);
         while (true)
         {
             var previous = sizes.GetValueOrDefault(folder);
@@ -180,7 +192,11 @@ static List<(string Path, long Bytes, int Remaining)> CleanupFolders(CleanupPlan
     var children = sizes.Keys.Where(folder => !comparer.Equals(folder, plan.RootPath))
         .ToLookup(folder => Path.GetDirectoryName(folder)!, comparer);
     var rows = new List<(string Path, long Bytes, int Remaining)>();
-    AddFolder(plan.RootPath);
+    if (plan.RepositoryRoots.Contains(plan.RootPath, comparer))
+        AddFolder(plan.RootPath);
+    else
+        foreach (var child in children[plan.RootPath].Order(comparer))
+            AddFolder(child);
     return rows;
 
     void AddFolder(string folder)
@@ -279,7 +295,7 @@ static CleanupResult PickFolders(ArtifactCleaner cleaner, CleanupPlan plan, bool
 
     void Run(Action refresh, bool live)
     {
-        while (rows[0].Remaining > 0)
+        while (rows.Any(row => row.Remaining > 0))
         {
             input = "";
             refresh();
@@ -323,7 +339,7 @@ static CleanupResult PickFolders(ArtifactCleaner cleaner, CleanupPlan plan, bool
             deleting = false;
             errors.AddRange(result.Errors);
             rows = CleanupFolders(plan, deleted);
-            status = (rows[0].Remaining > 0 ? "Unmarked items remain; failed or changed items are preserved." : "Cleanup complete.")
+            status = (rows.Any(row => row.Remaining > 0) ? "Unmarked items remain; failed or changed items are preserved." : "Cleanup complete.")
                 + (errors.Count > 0 ? $" {errors.Count} session errors (reported below)." : "");
         }
         input = "";
@@ -382,11 +398,19 @@ static string[] FolderParts(string root, string folder) => Path.GetRelativePath(
 static int FolderDepth(string root, string folder) =>
     Path.GetRelativePath(root, folder) == "." ? 0 : FolderParts(root, folder).Length;
 
-static string DisplayFolder(string root, string folder) => FolderDepth(root, folder) <= 2
-    ? folder : Path.Combine(root, Path.Combine(FolderParts(root, folder).Take(2).ToArray()));
+static bool IsAtOrBelow(string path, string parent)
+{
+    var comparison = OperatingSystem.IsWindows() ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal;
+    return string.Equals(path, parent, comparison)
+        || path.StartsWith(Path.EndsInDirectorySeparator(parent) ? parent : parent + Path.DirectorySeparatorChar,
+            comparison);
+}
+
+static string DisplayFolder(CleanupPlan plan, string folder) =>
+    plan.RepositoryRoots.FirstOrDefault(repository => IsAtOrBelow(folder, repository)) ?? folder;
 
 static string FormatFolder(string root, string folder) =>
-    new string(' ', FolderDepth(root, folder) * 2) + new DirectoryInfo(folder).Name;
+    new string(' ', Math.Max(0, FolderDepth(root, folder) - 1) * 2) + new DirectoryInfo(folder).Name;
 
 static string FormatSize(long bytes)
 {

@@ -106,13 +106,13 @@ static CleanupPlan Scan(ArtifactCleaner cleaner, string root, bool animate)
         {
             folders++;
             if (ScanFolder(folder) == folder && folder != root)
-                Console.WriteLine($"Scanning: {FormatFolder(root, folder)}");
-        }, (phase, _, _) =>
+                Console.WriteLine($"Scanning ({folders} folders):\n  {FormatFolder(root, folder)}");
+        }, (phase, current, total) =>
         {
             firstDetail = true;
             if (phase != lastPhase)
             {
-                Console.WriteLine($"{phase}...");
+                Console.WriteLine($"{phase} ({current}/{total})...");
                 lastPhase = phase;
             }
         }, detail =>
@@ -127,17 +127,44 @@ static CleanupPlan Scan(ArtifactCleaner cleaner, string root, bool animate)
         return plainPlan;
     }
 
-    var phaseStatus = "Scanning for Git repositories...";
-    var plan = AnsiConsole.Status().Spinner(Spinner.Known.Line).Start(phaseStatus, context =>
-        cleaner.Scan(root, folder =>
+    var column = new ScanProgressColumn();
+    var plan = AnsiConsole.Progress().AutoClear(true).Columns(column).Start(context =>
+    {
+        var task = context.AddTask("Scanning for Git repositories...");
+        task.IsIndeterminate = true;
+        string? lastPhase = null;
+        var result = cleaner.Scan(root, folder =>
         {
             folders++;
-            context.Status($"Scanning ({folders} folders): {Markup.Escape(Path.GetRelativePath(root, ScanFolder(folder)))}");
+            task.Description = $"Scanning ({folders} folders):";
+            column.Detail = Path.GetRelativePath(root, ScanFolder(folder));
+            if (column.Detail == ".")
+                column.Detail = new DirectoryInfo(root).Name;
+            context.Refresh();
         }, (phase, current, total) =>
         {
-            phaseStatus = $"{phase} ({current}/{total})...";
-            context.Status(phaseStatus);
-        }, detail => context.Status($"{phaseStatus}\n  [grey]{Markup.Escape(detail)}[/]")));
+            // Counters identify the active repository; the bar counts completed ones.
+            if (phase != lastPhase)
+            {
+                task.Value = 0;
+                task.MaxValue = Math.Max(1, total);
+                lastPhase = phase;
+            }
+            task.IsIndeterminate = false;
+            task.Value = Math.Max(0, current - 1);
+            task.Description = $"{phase} ({current}/{total})...";
+            column.Detail = "";
+            context.Refresh();
+        }, detail =>
+        {
+            column.Detail = detail;
+            context.Refresh();
+        });
+        task.Value = task.MaxValue;
+        task.StopTask();
+        context.Refresh();
+        return result;
+    });
     Console.WriteLine($"Scan complete: {folders} folders scanned.");
     return plan;
 }

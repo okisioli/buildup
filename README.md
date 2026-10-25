@@ -36,14 +36,13 @@ cleanup errors return 1 and are printed to standard error. Successful runs retur
 Interactive terminals show a Spectre.Console spinner while scanning, including
 the current folder and a folder count. During cleanup, the folder list shows
 progress and cumulative deleted file/directory counts and disk space saved.
-After folder discovery, the spinner switches to repository validation and then
-`Calculating results`, with repository counts. These phases query Git and build
-the cleanup plan, including file sizes; they can take time even after the last
-folder has been discovered. A second, gray line shows the current repository and
-activity (querying Git, measuring ignored files, or checking artifact folders),
-with eligible file/folder counts and bytes accumulated across the scan. During
-file and folder inspection it also shows the current path. File/folder detail
-updates are limited to ten per second; activity changes appear immediately.
+After discovery, validation and calculation keep the spinner and repository counter,
+with an ASCII progress bar below them. The bar counts completed repositories;
+the counter identifies the repository currently being processed. The current folder
+appears in gray on its own line, followed by the operation and eligible item/byte
+totals on separate lines. Detail updates are limited to ten per second; activity
+changes appear immediately. Scan rendering and styles live in
+`SRC/Buildup.Cli/ScanProgressColumn.cs`; scan callbacks are wired in `Program.cs`.
 Plain output announces each phase once and prints
 repository details, with additional updates at most once per second. Skipped
 repositories use a yellow `SKIP` label and gray details in interactive ANSI

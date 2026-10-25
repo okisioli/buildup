@@ -190,7 +190,7 @@ public sealed class ArtifactCleaner
                             File.Delete(entry.Path);
                             bytesDeleted += size;
                             files++;
-                            onDeleted?.Invoke(entry);
+                            onDeleted?.Invoke(entry with { Bytes = size });
                         }
                     }
                     catch (Exception ex) when (IsFileSystemError(ex))

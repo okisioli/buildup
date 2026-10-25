@@ -34,10 +34,8 @@ Linux/macOS executables are named `buildup` without `.exe`.
 `--help` prints usage. Unknown arguments return exit code 2;
 cleanup errors return 1 and are printed to standard error. Successful runs return 0.
 Interactive terminals show a Spectre.Console spinner while scanning, including
-the current folder and a folder count. After confirmation, a progress bar tracks
-successfully deleted files and directories against the preview's item count.
-Skipped or failed items do not advance the bar. Animation is cleared before the
-final result; errors and disk space totals are still reported normally.
+the current folder and a folder count. During cleanup, the folder list shows
+progress and cumulative deleted file/directory counts and disk space saved.
 After folder discovery, the spinner switches to repository validation and then
 `Calculating results`, with repository counts. These phases query Git and build
 the cleanup plan, including file sizes; they can take time even after the last
@@ -66,32 +64,19 @@ descendants, including contents hidden beneath repository roots. Parent totals i
 their child totals; do not add the rows together. Sizes appear in bold yellow in
 interactive ANSI terminals. Folders containing individually ignored files are
 included; only eligible ignored contents are removed from those folders.
-When the scan root is a valid Git repository, the app identifies it by its full
-path and shows the size estimate and a `Y`/`N` confirmation, without a folder tree
-or folder picker. `P` is not accepted in this mode. From a repository subfolder,
-the message explicitly identifies the containing repository being cleaned.
-When scanning outside a repository, the deletion prompt accepts `Y` to delete all previewed artifacts, `N` to cancel,
-or `P` to pick folders (case-insensitive, followed by Enter). Empty input, Escape,
-unrecognized input, or end of input cancels deletion. Nothing is deleted during scanning.
-In pick mode, every displayed folder receives a stable number. Type a number and
-press Enter to delete that folder's previewed artifacts, including all descendants.
-The folder itself is removed only if it is an eligible empty artifact directory;
-repository roots and preserved files remain. Parent selections include their
-children; selecting a repository includes its previewed artifacts and nested repositories.
-`Y` deletes all remaining previewed artifacts, and `N`, Enter, Escape, or end of
-input finishes picking. A multiline `Choose how to proceed` prompt lists these
-options and the available folder numbers. Interactive ANSI terminals redraw short
-lists in place and mark completed folders red with `deleted`. Lists too tall for
-the terminal print in full so every number is available in scrollback; redirected
-output prints refreshed plain lists. Disk space saved and deleted file/directory
-counts accumulate across the entire picking session. Saved space appears in cyan
-and deletion status in gray in interactive ANSI terminals.
-Sizes update to the remaining previewed file sizes. Only successful
-deletions mark a folder complete, so failed or changed items stay unmarked and
-can be retried. Git rules are rechecked for every selection, and newly created
-files are never added to the original preview.
-With plain output, each affected folder is grouped at its repository boundary and
-printed once during deletion with a `Removing:` prefix.
+When launched inside a repository, the app identifies that repository by its full
+path and displays one cleanup row. Otherwise, the picker shows the folder hierarchy.
+Use Up/Down to select a row, Delete to prepare cleanup, and Enter to confirm.
+Moving Up/Down or pressing Esc cancels a pending confirmation; Esc otherwise exits.
+Pending rows turn orange; completed folder names turn red with the actual saved
+amount in cyan. Cleanup includes descendants but preserves repository roots and
+noneligible files. Parent saved amounts include their children; do not add rows together.
+Failed or changed items remain available for retry. Git rules are rechecked for
+each selection, and newly created files are never added to the original preview.
+The picker redraws the whole list without a scrolling viewport or sticky instructions;
+rows may be hidden when the list exceeds the terminal height. Redirected input/output
+and terminals without interactive ANSI support print the preview without deleting.
+Nothing is deleted during scanning.
 File sizes are totaled during scanning, and `Estimated disk space savings:` is
 printed before confirmation. Sizes are read again immediately before deletion and
 counted only after successful deletion. A final line reports `Disk space saved:`
@@ -118,7 +103,7 @@ deletes nothing, even if it contains `.gitignore` files.
 Each discovered `.git` marker is validated with Git before any cleanup starts.
 Folders that Git rejects (including invalid repositories or repositories with dubious
 ownership) are skipped without failing the run. Their paths and Git's reason are
-printed before the deletion prompt, and their contents are protected from cleanup.
+printed before the cleanup preview, and their contents are protected from cleanup.
 Git environment overrides (`GIT_*`) are ignored so they cannot redirect cleanup to a
 different worktree or index; on-disk ignore rules and Git configuration still apply.
 Empty ignored directories are also removed. Ignore rules and tracked status are

@@ -28,7 +28,11 @@ try
     foreach (var skipped in plan.SkippedRepositories)
     {
         if (animate)
-            AnsiConsole.MarkupLine($"[yellow]SKIP[/] [grey]{Markup.Escape(skipped)}[/]");
+        {
+            AnsiConsole.Write(new Paragraph("SKIP", Constants.SkippedLabel)
+                .Append(" ").Append(skipped, Constants.SkippedDetail));
+            AnsiConsole.WriteLine();
+        }
         else
             Console.WriteLine($"SKIP {skipped}");
     }
@@ -212,7 +216,11 @@ static void PrintCleanupFolders(CleanupPlan plan, bool highlight)
     {
         var label = FormatFolder(plan.RootPath, row.Path);
         if (highlight)
-            AnsiConsole.MarkupLine($"{Markup.Escape(label)}  [bold yellow]{FormatSize(row.Bytes)}[/]");
+        {
+            AnsiConsole.Write(new Paragraph(label, Constants.FolderName)
+                .Append("  ").Append(FormatSize(row.Bytes), Constants.FolderSize));
+            AnsiConsole.WriteLine();
+        }
         else
             Console.WriteLine($"{label}  {FormatSize(row.Bytes)}");
     }
@@ -243,20 +251,30 @@ static CleanupResult PickFolders(ArtifactCleaner cleaner, CleanupPlan plan)
         for (var i = 0; i < rows.Count; i++)
         {
             var row = rows[i];
-            var label = Markup.Escape(FormatFolder(plan.RootPath, row.Path));
+            var label = FormatFolder(plan.RootPath, row.Path);
             var marker = i == selected && !finished ? "> " : "  ";
-            var nameStyle = row.Remaining == 0 ? "red"
-                : i == selected && confirming ? "orange1" : i == selected ? "bold reverse" : "default";
-            var detail = row.Remaining == 0
-                ? $"[cyan]{FormatSize(saved[row.Path])} saved[/]"
-                : $"[bold yellow]{FormatSize(row.Bytes)}[/]"
-                    + (saved[row.Path] > 0 ? $"  [cyan]{FormatSize(saved[row.Path])} saved[/]" : "");
+            var pendingCleanup = confirming && IsAtOrBelow(row.Path, rows[selected].Path);
+            var nameStyle = pendingCleanup
+                ? i == selected ? Constants.ConfirmationFolder : Constants.ConfirmationDescendant
+                : row.Remaining == 0 ? Constants.CompletedFolder
+                : i == selected ? Constants.SelectedFolder : Constants.FolderName;
+            var sizeStyle = pendingCleanup ? Constants.ConfirmationSize : Constants.FolderSize;
+            var line = new Paragraph(marker).Append(label, nameStyle).Append("  ");
+            if (row.Remaining == 0)
+                line.Append($"{FormatSize(saved[row.Path])} saved", Constants.SavedSize);
+            else
+            {
+                line.Append(FormatSize(row.Bytes), sizeStyle);
+                if (saved[row.Path] > 0)
+                    line.Append("  ").Append($"{FormatSize(saved[row.Path])} saved", Constants.SavedSize);
+            }
             if (i == selected && confirming)
-                detail += "  [orange1]Press Enter to confirm cleanup[/]";
-            lines.Add(new Markup($"{marker}[{nameStyle}]{label}[/]  {detail}"));
+                line.Append("  ").Append("Press Enter to confirm cleanup", Constants.ConfirmationMessage);
+            lines.Add(line);
         }
         lines.Add(new Text(""));
-        lines.Add(new Markup($"Disk space saved: [bold cyan]{FormatSize(bytes)}[/]."));
+        lines.Add(new Paragraph("Disk space saved: ")
+            .Append(FormatSize(bytes), Constants.TotalSavedSize).Append("."));
         lines.Add(new Text($"Deleted {files} files and {directories} directories this session."));
         lines.Add(new Text(status));
         if (!finished && !deleting)

@@ -5,7 +5,7 @@ if (args.Length == 1 && args[0] is "--help" or "-h")
 {
     Console.WriteLine("Usage: buildup");
     Console.WriteLine("Deletes ignored files in the current or nearest containing Git repository, or repositories below the current directory.");
-    Console.WriteLine("Previews cleanup; use Up/Down to select, Right/+ to expand, Left/- to collapse, Delete to clean, and Enter to confirm.");
+    Console.WriteLine("Previews cleanup; use Up/Down to select, Right/+ to expand, Left/- to collapse the folder or its parent, Delete to clean, and Enter to confirm.");
     return 0;
 }
 
@@ -269,14 +269,13 @@ static CleanupResult PickFolders(ArtifactCleaner cleaner, CleanupPlan plan)
         {
             var row = rows[i];
             var label = FormatFolder(plan.RootPath, row.Path);
-            var marker = i == selected && !finished
-                ? row.HasChildren && !expanded.Contains(row.Path) ? "+ " : "- "
-                : "  ";
+            var isSelected = i == selected && !finished;
+            var marker = isSelected && row.HasChildren ? "> " : "  ";
             var pendingCleanup = confirming && IsAtOrBelow(row.Path, rows[selected].Path);
             var nameStyle = pendingCleanup
-                ? i == selected ? Constants.ConfirmationFolder : Constants.ConfirmationDescendant
-                : row.Remaining == 0 ? Constants.CompletedFolder
-                : i == selected ? Constants.SelectedFolder : Constants.FolderName;
+                ? isSelected ? Constants.ConfirmationFolder : Constants.ConfirmationDescendant
+                : row.Remaining == 0 ? (isSelected ? Constants.SelectedCompletedFolder : Constants.CompletedFolder)
+                : isSelected ? Constants.SelectedFolder : Constants.FolderName;
             var sizeStyle = pendingCleanup ? Constants.ConfirmationSize : Constants.FolderSize;
             var line = new Paragraph(marker).Append(label, nameStyle).Append("  ");
             if (row.Remaining == 0)
@@ -301,7 +300,7 @@ static CleanupResult PickFolders(ArtifactCleaner cleaner, CleanupPlan plan)
             lines.Add(new Text(""));
             lines.Add(new Text(confirming
                 ? "Enter confirms cleanup of the selected folder and descendants; arrow keys, +/- or Esc cancel confirmation."
-                : "Up/Down navigate; Right/+ expand; Left/- collapse; Delete cleans; Enter confirms; Esc exits."));
+                : "Up/Down navigate; Right/+ expand; Left/- collapse folder or parent; Delete cleans; Enter confirms; Esc exits."));
         }
         return new Rows(lines);
     }
@@ -335,14 +334,16 @@ static CleanupResult PickFolders(ArtifactCleaner cleaner, CleanupPlan plan)
             {
                 confirming = false;
                 var row = rows[selected];
-                if (row.HasChildren)
+                if (key == ConsoleKey.RightArrow || input.KeyChar == '+')
                 {
-                    if (key == ConsoleKey.RightArrow || input.KeyChar == '+')
+                    if (row.HasChildren)
                         expanded.Add(row.Path);
-                    else
-                        expanded.Remove(row.Path);
-                    rows = VisibleRows();
                 }
+                else if (!expanded.Remove(row.Path) && Path.GetDirectoryName(row.Path) is { } parent
+                    && expanded.Remove(parent))
+                    selected = rows.FindIndex(candidate => comparer.Equals(candidate.Path, parent));
+
+                rows = VisibleRows();
             }
             else if (key == ConsoleKey.Delete && rows[selected].Remaining > 0)
                 confirming = true;

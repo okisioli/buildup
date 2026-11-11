@@ -67,9 +67,10 @@ included; only eligible ignored contents are removed from those folders.
 When launched inside a repository, the app identifies that repository by its full
 path and displays one cleanup row. Otherwise, the picker shows the folder hierarchy.
 The interactive tree starts collapsed at the first folder level. Use Up/Down to select
-a visible row, Right or `+` to expand its children, and Left or `-` to collapse them.
-Expansion stops at the existing repository-root boundary. The selected row shows
-`+` for a collapsed branch and `-` for an expanded branch or a leaf.
+a visible row and Right or `+` to expand it. Left or `-` collapses an open folder.
+From a leaf or a collapsed folder, Left or `-` collapses and selects its parent when
+the parent is visible. Expansion stops at the repository-root boundary. The selected
+row shows `>` if it has children. Selected leaves are highlighted without a marker.
 Use Delete to prepare cleanup and Enter to confirm. Arrow keys, `+`, `-`, or Esc
 cancel a pending confirmation; Esc otherwise exits.
 During confirmation, the selected folder has white text on a red background,

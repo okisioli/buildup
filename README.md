@@ -66,8 +66,12 @@ interactive ANSI terminals. Folders containing individually ignored files are
 included; only eligible ignored contents are removed from those folders.
 When launched inside a repository, the app identifies that repository by its full
 path and displays one cleanup row. Otherwise, the picker shows the folder hierarchy.
-Use Up/Down to select a row, Delete to prepare cleanup, and Enter to confirm.
-Moving Up/Down or pressing Esc cancels a pending confirmation; Esc otherwise exits.
+The interactive tree starts collapsed at the first folder level. Use Up/Down to select
+a visible row, Right or `+` to expand its children, and Left or `-` to collapse them.
+Expansion stops at the existing repository-root boundary. The selected row shows
+`+` for a collapsed branch and `-` for an expanded branch or a leaf.
+Use Delete to prepare cleanup and Enter to confirm. Arrow keys, `+`, `-`, or Esc
+cancel a pending confirmation; Esc otherwise exits.
 During confirmation, the selected folder has white text on a red background,
 its visible descendant names keep the default foreground, and sizes for the selected
 folder and its descendants turn cyan. Other rows keep their normal colors. The confirmation

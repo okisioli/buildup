@@ -69,8 +69,8 @@ path and displays one cleanup row. Otherwise, the picker shows the folder hierar
 The interactive tree starts collapsed at the first folder level. Use Up/Down to select
 a visible row and Right or `+` to expand it. Left or `-` collapses an open folder.
 From a leaf or a collapsed folder, Left or `-` collapses and selects its parent when
-the parent is visible. Expansion stops at the repository-root boundary. The selected
-row shows `>` if it has children. Selected leaves are highlighted without a marker.
+the parent is visible. Expansion stops at the repository-root boundary. Expandable
+rows show `>` while selected or open. Only the selected row is highlighted.
 Use Delete to prepare cleanup and Enter to confirm. Arrow keys, `+`, `-`, or Esc
 cancel a pending confirmation; Esc otherwise exits.
 During confirmation, the selected folder has white text on a red background,

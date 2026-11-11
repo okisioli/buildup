@@ -270,7 +270,7 @@ static CleanupResult PickFolders(ArtifactCleaner cleaner, CleanupPlan plan)
             var row = rows[i];
             var label = FormatFolder(plan.RootPath, row.Path);
             var isSelected = i == selected && !finished;
-            var marker = isSelected && row.HasChildren ? "> " : "  ";
+            var marker = !finished && row.HasChildren && (i == selected || expanded.Contains(row.Path)) ? "> " : "  ";
             var pendingCleanup = confirming && IsAtOrBelow(row.Path, rows[selected].Path);
             var nameStyle = pendingCleanup
                 ? isSelected ? Constants.ConfirmationFolder : Constants.ConfirmationDescendant

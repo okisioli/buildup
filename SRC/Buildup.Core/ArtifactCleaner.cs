@@ -89,6 +89,7 @@ public sealed class ArtifactCleaner
                 var ignoredDirectories = IgnoredPaths(repository, true);
                 var directoryCandidates = new HashSet<string>(PathComparer);
                 var removed = new HashSet<string>(PathComparer);
+                var safeDirectories = new Dictionary<string, bool>(PathComparer);
 
                 ReportDetail(repository, $"Measuring {ignoredFiles.Length:N0} ignored files", force: true);
                 foreach (var path in ignoredFiles)
@@ -96,7 +97,7 @@ public sealed class ArtifactCleaner
                     ReportDetail(repository, "Measuring ignored files", path);
                     try
                     {
-                        if (!IsSafe(path, root, repository, repositories, metadata) || !File.Exists(path))
+                        if (!IsSafe(path, false, repository, metadata, safeDirectories) || !File.Exists(path))
                             continue;
                         var size = new FileInfo(path).Length;
                         removed.Add(path);
@@ -112,15 +113,13 @@ public sealed class ArtifactCleaner
 
                 ReportDetail(repository, "Finding ignored subfolders", force: true);
                 foreach (var path in ignoredDirectories.Where(Directory.Exists))
-                    CollectDirectories(path, root, repository, repositories, metadata, directoryCandidates, errors,
+                    CollectDirectories(path, repository, metadata, safeDirectories, directoryCandidates, errors,
                         folder => ReportDetail(repository, "Finding ignored subfolders", folder));
 
                 ReportDetail(repository, $"Checking {directoryCandidates.Count:N0} artifact folders", force: true);
                 foreach (var path in directoryCandidates.OrderByDescending(path => path.Length))
                 {
                     ReportDetail(repository, "Checking artifact folders", path);
-                    if (!IsSafe(path, root, repository, repositories, metadata))
-                        continue;
                     try
                     {
                         // Never recursively delete: unexpected files or concurrent writes keep the directory alive.
@@ -168,7 +167,7 @@ public sealed class ArtifactCleaner
                 {
                     try
                     {
-                        if (!IsSafe(entry.Path, plan.RootPath, repository, plan.Repositories, plan.Metadata))
+                        if (!IsSafe(entry.Path, entry.IsDirectory, repository, plan.Metadata))
                             continue;
                         if (entry.IsDirectory)
                         {
@@ -213,11 +212,13 @@ public sealed class ArtifactCleaner
         onScanning?.Invoke(path);
         try
         {
-            if (File.Exists(Path.Combine(path, ".git")) || Directory.Exists(Path.Combine(path, ".git")))
+            if (HasGitMarker(path))
+            {
                 repositories.Add(path);
+                return;
+            }
             // Bare repositories have no worktree to clean. Do not enter their object database.
-            if (File.Exists(Path.Combine(path, "HEAD")) && Directory.Exists(Path.Combine(path, "objects"))
-                && Directory.Exists(Path.Combine(path, "refs")))
+            if (IsGitDirectory(path))
             {
                 metadata.Add(path);
                 return;
@@ -247,18 +248,17 @@ public sealed class ArtifactCleaner
             .ToArray();
     }
 
-    private static void CollectDirectories(string path, string root, string repository,
-        HashSet<string> repositories, HashSet<string> metadata, HashSet<string> candidates, List<string> errors,
+    private static void CollectDirectories(string path, string repository, HashSet<string> metadata,
+        Dictionary<string, bool> safeDirectories, HashSet<string> candidates, List<string> errors,
         Action<string>? onDirectory = null)
     {
-        if (!IsSafe(path, root, repository, repositories, metadata))
-            return;
         try
         {
-            candidates.Add(path);
+            if (!IsSafe(path, true, repository, metadata, safeDirectories) || !candidates.Add(path))
+                return;
             onDirectory?.Invoke(path);
             foreach (var child in Directory.EnumerateDirectories(path))
-                CollectDirectories(child, root, repository, repositories, metadata, candidates, errors, onDirectory);
+                CollectDirectories(child, repository, metadata, safeDirectories, candidates, errors, onDirectory);
         }
         catch (Exception ex) when (IsFileSystemError(ex))
         {
@@ -266,27 +266,48 @@ public sealed class ArtifactCleaner
         }
     }
 
-    private static bool IsSafe(string path, string root, string repository, HashSet<string> repositories,
-        HashSet<string> metadata)
+    private static bool IsSafe(string path, bool isDirectory, string repository, HashSet<string> metadata,
+        Dictionary<string, bool>? safeDirectories = null)
     {
-        if (!PathComparer.Equals(repository, root) && !IsWithin(repository, root))
-            return false;
-        if (!IsWithin(path, root) || !IsWithin(path, repository))
+        if (!IsWithin(path, repository))
             return false;
         if (metadata.Any(directory => PathComparer.Equals(path, directory) || IsWithin(path, directory)))
             return false;
-        if (repositories.Any(other => IsWithin(other, repository)
-            && (PathComparer.Equals(path, other) || IsWithin(path, other))))
-            return false;
-        for (string? current = path; current is not null; current = Path.GetDirectoryName(current))
+        return isDirectory ? IsSafeDirectory(path) : IsSafeDirectory(Path.GetDirectoryName(path)!)
+            && !IsGitMetadata(path) && !IsLink(path);
+
+        bool IsSafeDirectory(string directory)
         {
-            if (IsGitMetadata(current) || IsLink(current))
-                return false;
-            if (PathComparer.Equals(current, repository))
-                return true;
+            if (safeDirectories is not null && safeDirectories.TryGetValue(directory, out var cached))
+                return cached;
+
+            // Check parents first so paths through junctions are never probed for Git markers.
+            var safe = PathComparer.Equals(directory, repository)
+                ? !IsGitMetadata(directory) && !IsLink(directory)
+                : IsSafeDirectory(Path.GetDirectoryName(directory)!) && !IsGitMetadata(directory)
+                    && !IsLink(directory) && !HasGitMarker(directory) && !IsGitDirectory(directory);
+            if (safeDirectories is not null)
+                safeDirectories[directory] = safe;
+            return safe;
         }
-        return false;
     }
+
+    private static bool HasGitMarker(string directory)
+    {
+        try
+        {
+            File.GetAttributes(Path.Combine(directory, ".git"));
+            return true;
+        }
+        catch (FileNotFoundException)
+        {
+            return false;
+        }
+    }
+
+    private static bool IsGitDirectory(string path) => File.Exists(Path.Combine(path, "HEAD"))
+        && ((Directory.Exists(Path.Combine(path, "objects")) && Directory.Exists(Path.Combine(path, "refs")))
+            || File.Exists(Path.Combine(path, "commondir")));
 
     private static bool IsWithin(string path, string parent) =>
         path.StartsWith(Path.EndsInDirectorySeparator(parent) ? parent : parent + Path.DirectorySeparatorChar,

@@ -89,17 +89,6 @@ static string? FindContainingRepository(string path)
 static CleanupPlan Scan(ArtifactCleaner cleaner, string root, bool animate)
 {
     var folders = 0;
-    var repositoryBorders = new List<string>();
-
-    string ScanFolder(string folder)
-    {
-        var border = repositoryBorders.FirstOrDefault(repository => IsAtOrBelow(folder, repository));
-        if (border is not null)
-            return border;
-        if (File.Exists(Path.Combine(folder, ".git")) || Directory.Exists(Path.Combine(folder, ".git")))
-            repositoryBorders.Add(folder);
-        return folder;
-    }
 
     if (!animate)
     {
@@ -109,7 +98,7 @@ static CleanupPlan Scan(ArtifactCleaner cleaner, string root, bool animate)
         var plainPlan = cleaner.Scan(root, folder =>
         {
             folders++;
-            if (ScanFolder(folder) == folder && folder != root)
+            if (folder != root)
                 Console.WriteLine($"Scanning ({folders} folders):\n  {FormatFolder(root, folder)}");
         }, (phase, current, total) =>
         {
@@ -141,7 +130,7 @@ static CleanupPlan Scan(ArtifactCleaner cleaner, string root, bool animate)
         {
             folders++;
             task.Description = $"Scanning ({folders} folders):";
-            column.Detail = Path.GetRelativePath(root, ScanFolder(folder));
+            column.Detail = Path.GetRelativePath(root, folder);
             if (column.Detail == ".")
                 column.Detail = new DirectoryInfo(root).Name;
             context.Refresh();

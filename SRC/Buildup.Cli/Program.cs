@@ -284,6 +284,12 @@ static CleanupResult PickFolders(ArtifactCleaner cleaner, CleanupPlan plan)
             .Append(FormatSize(bytes), Constants.TotalSavedSize).Append("."));
         lines.Add(new Text($"Deleted {files} files and {directories} directories this session."));
         lines.Add(new Text(status));
+        if (!finished && errors.Count > 0)
+        {
+            lines.Add(new Text($"Cleanup errors this session ({errors.Count}):"));
+            foreach (var error in errors)
+                lines.Add(new Text(error));
+        }
         if (!finished && !deleting)
         {
             lines.Add(new Text(""));
@@ -362,10 +368,9 @@ static CleanupResult PickFolders(ArtifactCleaner cleaner, CleanupPlan plan)
                 errors.AddRange(result.Errors);
                 allRows = CleanupFolders(plan, deleted);
                 rows = VisibleRows();
-                status = (allRows.Any(row => row.Remaining > 0)
+                status = allRows.Any(row => row.Remaining > 0)
                     ? "Remaining items can be cleaned; failed or changed items are preserved and can be retried."
-                    : "Cleanup complete. Press Esc to exit.")
-                    + (errors.Count > 0 ? $" {errors.Count} session errors (reported below)." : "");
+                    : "Cleanup complete. Press Esc to exit.";
             }
             else
                 continue;

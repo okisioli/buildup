@@ -230,7 +230,6 @@ static CleanupResult PickFolders(ArtifactCleaner cleaner, CleanupPlan plan)
     var selected = 0;
     var confirming = false;
     var deleting = false;
-    var finished = false;
     var status = "Cleanup removes previewed artifacts, including descendants; repository roots are preserved.";
 
     List<(string Path, long Bytes, int Remaining, bool HasChildren)> VisibleRows()
@@ -248,7 +247,7 @@ static CleanupResult PickFolders(ArtifactCleaner cleaner, CleanupPlan plan)
         return visible;
     }
 
-    Spectre.Console.Rendering.IRenderable Frame()
+    Spectre.Console.Rendering.IRenderable Frame(bool finished = false)
     {
         var lines = new List<Spectre.Console.Rendering.IRenderable>
         {
@@ -284,11 +283,11 @@ static CleanupResult PickFolders(ArtifactCleaner cleaner, CleanupPlan plan)
             .Append(FormatSize(bytes), Constants.TotalSavedSize).Append("."));
         lines.Add(new Text($"Deleted {files} files and {directories} directories this session."));
         lines.Add(new Text(status));
-        if (!finished && errors.Count > 0)
+        if (errors.Count > 0)
         {
-            lines.Add(new Text($"Cleanup errors this session ({errors.Count}):"));
+            lines.Add(new Text($"Cleanup errors this session ({errors.Count}):", Constants.CleanupErrorHeading));
             foreach (var error in errors)
-                lines.Add(new Text(error));
+                lines.Add(new Text(error, Constants.CleanupErrorDetail));
         }
         if (!finished && !deleting)
         {
@@ -301,7 +300,7 @@ static CleanupResult PickFolders(ArtifactCleaner cleaner, CleanupPlan plan)
     }
 
     // Render the whole list for now; a scrolling viewport is a separate change.
-    AnsiConsole.Live(Frame()).AutoClear(false).Overflow(VerticalOverflow.Visible).Start(context =>
+    AnsiConsole.Live(Frame()).AutoClear(true).Overflow(VerticalOverflow.Visible).Start(context =>
     {
         void Refresh()
         {
@@ -376,13 +375,9 @@ static CleanupResult PickFolders(ArtifactCleaner cleaner, CleanupPlan plan)
                 continue;
             Refresh();
         }
-        finished = true;
-        Refresh();
     });
 
-    Console.WriteLine();
-    foreach (var error in errors)
-        Console.Error.WriteLine(error);
+    AnsiConsole.Write(Frame(finished: true));
     return new CleanupResult(files, directories, bytes, errors.AsReadOnly());
 }
 

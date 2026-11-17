@@ -5,7 +5,7 @@ if (args.Length == 1 && args[0] is "--help" or "-h")
 {
     Console.WriteLine("Usage: buildup");
     Console.WriteLine("Deletes ignored files in the current or nearest containing Git repository, or repositories below the current directory.");
-    Console.WriteLine("Previews cleanup; use Up/Down to select, Delete to clean, and Enter to confirm.");
+    Console.WriteLine("Previews cleanup; use Up/Down to select, Right/+ to expand, Left/- to collapse the folder or its parent, Delete to clean, and Enter to confirm.");
     return 0;
 }
 
@@ -173,7 +173,7 @@ static CleanupPlan Scan(ArtifactCleaner cleaner, string root, bool animate)
     return plan;
 }
 
-static List<(string Path, long Bytes, int Remaining)> CleanupFolders(CleanupPlan plan,
+static List<(string Path, long Bytes, int Remaining, bool HasChildren)> CleanupFolders(CleanupPlan plan,
     HashSet<string>? deleted = null)
 {
     var comparer = OperatingSystem.IsWindows() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal;
@@ -194,7 +194,7 @@ static List<(string Path, long Bytes, int Remaining)> CleanupFolders(CleanupPlan
 
     var children = sizes.Keys.Where(folder => !comparer.Equals(folder, plan.RootPath))
         .ToLookup(folder => Path.GetDirectoryName(folder)!, comparer);
-    var rows = new List<(string Path, long Bytes, int Remaining)>();
+    var rows = new List<(string Path, long Bytes, int Remaining, bool HasChildren)>();
     if (plan.RepositoryRoots.Contains(plan.RootPath, comparer))
         AddFolder(plan.RootPath);
     else
@@ -204,7 +204,7 @@ static List<(string Path, long Bytes, int Remaining)> CleanupFolders(CleanupPlan
 
     void AddFolder(string folder)
     {
-        rows.Add((folder, sizes[folder].Bytes, sizes[folder].Remaining));
+        rows.Add((folder, sizes[folder].Bytes, sizes[folder].Remaining, children.Contains(folder)));
         foreach (var child in children[folder].Order(comparer))
             AddFolder(child);
     }
@@ -230,8 +230,10 @@ static CleanupResult PickFolders(ArtifactCleaner cleaner, CleanupPlan plan)
 {
     var comparer = OperatingSystem.IsWindows() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal;
     var deleted = new HashSet<string>(comparer);
-    var rows = CleanupFolders(plan, deleted);
-    var saved = rows.ToDictionary(row => row.Path, _ => 0L, comparer);
+    var expanded = new HashSet<string>(comparer);
+    var allRows = CleanupFolders(plan, deleted);
+    var rows = VisibleRows();
+    var saved = allRows.ToDictionary(row => row.Path, _ => 0L, comparer);
     var errors = new List<string>();
     var files = 0;
     var directories = 0;
@@ -241,6 +243,21 @@ static CleanupResult PickFolders(ArtifactCleaner cleaner, CleanupPlan plan)
     var deleting = false;
     var finished = false;
     var status = "Cleanup removes previewed artifacts, including descendants; repository roots are preserved.";
+
+    List<(string Path, long Bytes, int Remaining, bool HasChildren)> VisibleRows()
+    {
+        var visible = new List<(string Path, long Bytes, int Remaining, bool HasChildren)>();
+        string? collapsedFolder = null;
+        // CleanupFolders returns parents before their contiguous descendants.
+        foreach (var row in allRows)
+        {
+            if (collapsedFolder is not null && IsAtOrBelow(row.Path, collapsedFolder))
+                continue;
+            visible.Add(row);
+            collapsedFolder = row.HasChildren && !expanded.Contains(row.Path) ? row.Path : null;
+        }
+        return visible;
+    }
 
     Spectre.Console.Rendering.IRenderable Frame()
     {
@@ -252,12 +269,13 @@ static CleanupResult PickFolders(ArtifactCleaner cleaner, CleanupPlan plan)
         {
             var row = rows[i];
             var label = FormatFolder(plan.RootPath, row.Path);
-            var marker = i == selected && !finished ? "> " : "  ";
+            var isSelected = i == selected && !finished;
+            var marker = !finished && row.HasChildren && (i == selected || expanded.Contains(row.Path)) ? "> " : "  ";
             var pendingCleanup = confirming && IsAtOrBelow(row.Path, rows[selected].Path);
             var nameStyle = pendingCleanup
-                ? i == selected ? Constants.ConfirmationFolder : Constants.ConfirmationDescendant
-                : row.Remaining == 0 ? Constants.CompletedFolder
-                : i == selected ? Constants.SelectedFolder : Constants.FolderName;
+                ? isSelected ? Constants.ConfirmationFolder : Constants.ConfirmationDescendant
+                : row.Remaining == 0 ? (isSelected ? Constants.SelectedCompletedFolder : Constants.CompletedFolder)
+                : isSelected ? Constants.SelectedFolder : Constants.FolderName;
             var sizeStyle = pendingCleanup ? Constants.ConfirmationSize : Constants.FolderSize;
             var line = new Paragraph(marker).Append(label, nameStyle).Append("  ");
             if (row.Remaining == 0)
@@ -281,8 +299,8 @@ static CleanupResult PickFolders(ArtifactCleaner cleaner, CleanupPlan plan)
         {
             lines.Add(new Text(""));
             lines.Add(new Text(confirming
-                ? "Enter confirms cleanup of the selected folder and descendants; Up/Down or Esc cancels confirmation."
-                : "Up/Down navigate; press Delete to clean, Enter to confirm; Esc exits."));
+                ? "Enter confirms cleanup of the selected folder and descendants; arrow keys, +/- or Esc cancel confirmation."
+                : "Up/Down navigate; Right/+ expand; Left/- collapse folder or parent; Delete cleans; Enter confirms; Esc exits."));
         }
         return new Rows(lines);
     }
@@ -299,7 +317,8 @@ static CleanupResult PickFolders(ArtifactCleaner cleaner, CleanupPlan plan)
         Refresh();
         while (true)
         {
-            var key = Console.ReadKey(intercept: true).Key;
+            var input = Console.ReadKey(intercept: true);
+            var key = input.Key;
             if (key == ConsoleKey.Escape)
             {
                 if (!confirming)
@@ -310,6 +329,21 @@ static CleanupResult PickFolders(ArtifactCleaner cleaner, CleanupPlan plan)
             {
                 confirming = false;
                 selected = Math.Clamp(selected + (key == ConsoleKey.UpArrow ? -1 : 1), 0, rows.Count - 1);
+            }
+            else if (key is ConsoleKey.RightArrow or ConsoleKey.LeftArrow || input.KeyChar is '+' or '-')
+            {
+                confirming = false;
+                var row = rows[selected];
+                if (key == ConsoleKey.RightArrow || input.KeyChar == '+')
+                {
+                    if (row.HasChildren)
+                        expanded.Add(row.Path);
+                }
+                else if (!expanded.Remove(row.Path) && Path.GetDirectoryName(row.Path) is { } parent
+                    && expanded.Remove(parent))
+                    selected = rows.FindIndex(candidate => comparer.Equals(candidate.Path, parent));
+
+                rows = VisibleRows();
             }
             else if (key == ConsoleKey.Delete && rows[selected].Remaining > 0)
                 confirming = true;
@@ -323,7 +357,7 @@ static CleanupResult PickFolders(ArtifactCleaner cleaner, CleanupPlan plan)
                 var result = cleaner.Delete(plan.ForFolder(rows[selected].Path), onDeleted: entry =>
                 {
                     deleted.Add(entry.Path);
-                    foreach (var row in rows)
+                    foreach (var row in allRows)
                         if (IsAtOrBelow(entry.Path, row.Path))
                             saved[row.Path] += entry.Bytes;
                     if (++removed % 128 == 0)
@@ -337,8 +371,9 @@ static CleanupResult PickFolders(ArtifactCleaner cleaner, CleanupPlan plan)
                 bytes += result.BytesDeleted;
                 deleting = false;
                 errors.AddRange(result.Errors);
-                rows = CleanupFolders(plan, deleted);
-                status = (rows.Any(row => row.Remaining > 0)
+                allRows = CleanupFolders(plan, deleted);
+                rows = VisibleRows();
+                status = (allRows.Any(row => row.Remaining > 0)
                     ? "Remaining items can be cleaned; failed or changed items are preserved and can be retried."
                     : "Cleanup complete. Press Esc to exit.")
                     + (errors.Count > 0 ? $" {errors.Count} session errors (reported below)." : "");

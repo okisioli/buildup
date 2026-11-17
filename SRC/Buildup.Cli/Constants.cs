@@ -9,6 +9,8 @@ internal static class Constants
         background: new Color(255, 0, 0));
     public static readonly Style ConfirmationDescendant = new(foreground: null, background: null);
     public static readonly Style CompletedFolder = new(foreground: Color.Red, background: null);
+    public static readonly Style SelectedCompletedFolder = new(foreground: Color.Red, background: null,
+        decoration: Decoration.Bold | Decoration.Invert);
     public static readonly Style FolderSize = new(foreground: Color.Yellow, background: null,
         decoration: Decoration.Bold);
     public static readonly Style ConfirmationSize = new(foreground: Color.Cyan, background: null);

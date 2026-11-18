@@ -1,4 +1,4 @@
-namespace Buildup.Core;
+namespace Okisioli.Tools.Buildup.Core;
 
 public sealed class CleanupPlan
 {

@@ -1,0 +1,7 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <AssemblyName>Okisioli.Tools.Buildup.Core</AssemblyName>
+    <RootNamespace>Okisioli.Tools.Buildup.Core</RootNamespace>
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+</Project>

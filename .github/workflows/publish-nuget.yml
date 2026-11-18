@@ -1,0 +1,28 @@
+name: Publish NuGet tool
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+      - name: Build
+        run: dotnet build Okisioli.Tools.Buildup.slnx --configuration Release -m:1
+      - name: Pack tool
+        run: dotnet pack SRC/Okisioli.Tools.Buildup.CLI/Okisioli.Tools.Buildup.CLI.csproj --configuration Release --no-build --output Build/packages -m:1
+      - name: Verify tool installation
+        run: |
+          dotnet tool install Okisioli.Tools.Buildup --version 1.0.0 --add-source "$GITHUB_WORKSPACE/Build/packages" --tool-path "$RUNNER_TEMP/buildup-tool"
+          "$RUNNER_TEMP/buildup-tool/buildup" --help
+      - name: Push to NuGet.org
+        env:
+          NUGET_API_KEY: ${{ secrets.NUGET_API_KEY }}
+        run: dotnet nuget push Build/packages/Okisioli.Tools.Buildup.1.0.0.nupkg --api-key "$NUGET_API_KEY" --source https://api.nuget.org/v3/index.json

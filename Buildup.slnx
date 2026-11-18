@@ -1,6 +1,0 @@
-<Solution>
-  <Folder Name="/SRC/">
-    <Project Path="SRC/Buildup.Core/Buildup.Core.csproj" />
-    <Project Path="SRC/Buildup.Cli/Buildup.Cli.csproj" />
-  </Folder>
-</Solution>

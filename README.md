@@ -4,16 +4,10 @@ Interactive cleanup of Git-ignored files, with a preview before permanent deleti
 
 ## Install and run
 
-Requires the .NET 10 SDK and Git on PATH.
-
 ```powershell
 dotnet tool install --global Okisioli.Tools.Buildup --version 1.0.0
 buildup
 ```
-
-Run from the folder you want to scan. Use Up/Down to select, Right/+ to expand,
-Left/- to collapse, Delete to clean, and Enter to confirm. Use `buildup --help`
-for usage. Ensure the .NET tools directory is on PATH if the command is not found.
 
 ## Development
 

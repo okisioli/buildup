@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Diagnostics;
 
 namespace Buildup.Core;
@@ -87,30 +88,50 @@ public sealed class ArtifactCleaner
                 prepared.SkippedRepositories);
         }
 
-        Parallel.ForEachAsync(prepared.Repositories.Order(PathComparer), new ParallelOptions
+        // Rotate among top-level branches instead of filling all worker slots from
+        // the first branch. A branch has at most one repository being measured at a time.
+        var branches = prepared.Repositories
+            .GroupBy(repository => Path.GetRelativePath(prepared.RootPath, repository)
+                .Split([Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar], 2)[0], PathComparer)
+            .OrderBy(group => group.Key, PathComparer)
+            .Select(group => new Queue<string>(group
+                .OrderBy(path => path.Count(character => character == Path.DirectorySeparatorChar
+                    || character == Path.AltDirectorySeparatorChar))
+                .ThenBy(path => path, PathComparer)))
+            .ToArray();
+        var pending = new ConcurrentQueue<Queue<string>>(branches);
+        var workerCount = Math.Min(branches.Length, Math.Min(4, Environment.ProcessorCount));
+        Parallel.ForEachAsync(Enumerable.Range(0, workerCount), new ParallelOptions
         {
-            MaxDegreeOfParallelism = Math.Min(4, Environment.ProcessorCount),
+            MaxDegreeOfParallelism = Math.Max(1, workerCount),
             CancellationToken = cancellationToken
-        }, (repository, workerCancellation) =>
+        }, (_, workerCancellation) =>
         {
-            lock (gate)
-                onProgress?.Invoke("Calculating results", ++started, prepared.Repositories.Count);
-            var scoped = new CleanupPlan(prepared.RootPath, new HashSet<string>(PathComparer) { repository },
-                prepared.Metadata, Array.Empty<CleanupEntry>(), 0, Array.Empty<string>(), Array.Empty<string>());
-            CalculateRepository(scoped, onDetail is null ? null : detail =>
+            while (pending.TryDequeue(out var branch))
             {
+                workerCancellation.ThrowIfCancellationRequested();
+                var repository = branch.Dequeue();
                 lock (gate)
-                    onDetail(detail);
-            }, update =>
-            {
-                lock (gate)
+                    onProgress?.Invoke("Calculating results", ++started, prepared.Repositories.Count);
+                var scoped = new CleanupPlan(prepared.RootPath, new HashSet<string>(PathComparer) { repository },
+                    prepared.Metadata, Array.Empty<CleanupEntry>(), 0, Array.Empty<string>(), Array.Empty<string>());
+                CalculateRepository(scoped, onDetail is null ? null : detail =>
                 {
-                    results[repository] = update.Plan;
-                    completed.UnionWith(update.CompletedRepositories);
-                    onUpdate?.Invoke(new CleanupCalculation(Snapshot(),
-                        Array.AsReadOnly(completed.Order(PathComparer).ToArray())));
-                }
-            }, workerCancellation);
+                    lock (gate)
+                        onDetail(detail);
+                }, update =>
+                {
+                    lock (gate)
+                    {
+                        results[repository] = update.Plan;
+                        completed.UnionWith(update.CompletedRepositories);
+                        onUpdate?.Invoke(new CleanupCalculation(Snapshot(),
+                            Array.AsReadOnly(completed.Order(PathComparer).ToArray())));
+                    }
+                }, workerCancellation);
+                if (branch.Count > 0)
+                    pending.Enqueue(branch);
+            }
             return ValueTask.CompletedTask;
         }).GetAwaiter().GetResult();
         return Snapshot();

@@ -162,7 +162,7 @@ static CleanupPlan Scan(ArtifactCleaner cleaner, string root, bool animate)
 }
 
 static List<(string Path, long Bytes, int Remaining, bool HasChildren)> CleanupFolders(CleanupPlan plan,
-    HashSet<string>? deleted = null)
+    HashSet<string>? deleted = null, IEnumerable<string>? pendingRepositories = null)
 {
     var comparer = OperatingSystem.IsWindows() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal;
     var sizes = new Dictionary<string, (long Bytes, int Remaining)>(comparer);
@@ -174,6 +174,20 @@ static List<(string Path, long Bytes, int Remaining, bool HasChildren)> CleanupF
             var previous = sizes.GetValueOrDefault(folder);
             var pending = deleted is null || !deleted.Contains(entry.Path);
             sizes[folder] = (previous.Bytes + (pending ? entry.Bytes : 0), previous.Remaining + (pending ? 1 : 0));
+            if (comparer.Equals(folder, plan.RootPath))
+                break;
+            folder = Path.GetDirectoryName(folder)!;
+        }
+    }
+
+    // Pending branches are visible immediately; measured entries retain eligible
+    // branches (including completed cleanup results) after pending placeholders disappear.
+    foreach (var repository in pendingRepositories ?? Array.Empty<string>())
+    {
+        var folder = repository;
+        while (true)
+        {
+            sizes.TryAdd(folder, (0, 0));
             if (comparer.Equals(folder, plan.RootPath))
                 break;
             folder = Path.GetDirectoryName(folder)!;
@@ -232,7 +246,7 @@ static CleanupResult PickFolders(ArtifactCleaner cleaner, CleanupPlan plan)
 
     var deleted = new HashSet<string>(comparer);
     var expanded = new HashSet<string>(comparer);
-    var allRows = CleanupFolders(plan, deleted);
+    var allRows = CleanupFolders(plan, deleted, plan.RepositoryRoots);
     var rows = VisibleRows();
     var saved = allRows.ToDictionary(row => row.Path, _ => 0L, comparer);
     var errors = new List<string>();
@@ -243,12 +257,13 @@ static CleanupResult PickFolders(ArtifactCleaner cleaner, CleanupPlan plan)
     var confirming = false;
     var deleting = false;
     var finished = false;
-    var status = "Calculating cleanup sizes; folders appear as artifacts are found.";
+    var status = "Calculating cleanup sizes; empty branches are removed as counting finishes.";
 
     void RebuildRows()
     {
         var selectedPath = rows.Count > 0 ? rows[selected].Path : null;
-        allRows = CleanupFolders(plan, deleted);
+        allRows = CleanupFolders(plan, deleted,
+            plan.RepositoryRoots.Where(repository => !completed.Contains(repository)));
         rows = VisibleRows();
         var newSelection = selectedPath is null ? -1
             : rows.FindIndex(row => comparer.Equals(row.Path, selectedPath));
@@ -424,8 +439,7 @@ static CleanupResult PickFolders(ArtifactCleaner cleaner, CleanupPlan plan)
                     bytes += result.BytesDeleted;
                     deleting = false;
                     errors.AddRange(result.Errors);
-                    allRows = CleanupFolders(plan, deleted);
-                    rows = VisibleRows();
+                    RebuildRows();
                     status = (allRows.Any(row => row.Remaining > 0 || IsCalculating(row.Path))
                         ? "Remaining items can be cleaned; failed or changed items are preserved and can be retried."
                         : "Cleanup complete. Press Esc to exit.")

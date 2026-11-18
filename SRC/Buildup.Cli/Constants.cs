@@ -24,6 +24,8 @@ internal static class Constants
     public static readonly Style ConfirmationMessage = new(foreground: new Color(255, 0, 0), background: null);
     public static readonly Style SkippedLabel = new(foreground: Color.Yellow, background: null);
     public static readonly Style SkippedDetail = new(foreground: Color.Grey, background: null);
+    public static readonly Style CleanupErrorHeading = new(foreground: Color.Red, background: null);
+    public static readonly Style CleanupErrorDetail = new(foreground: Color.Grey, background: null);
     public static readonly Style ScanDetail = new(foreground: Color.Grey, background: null);
     public static readonly Style ProgressFilled = new(foreground: Color.Cyan, background: null);
     public static readonly Style ProgressRemaining = new(foreground: Color.Grey, background: null);

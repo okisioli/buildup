@@ -9,6 +9,10 @@ public sealed class ArtifactCleaner
 
     public CleanupPlan Scan(string rootPath, Action<string>? onScanning = null,
         Action<string, int, int>? onProgress = null, Action<string>? onDetail = null)
+        => Calculate(Prepare(rootPath, onScanning, onProgress, onDetail), onProgress, onDetail);
+
+    public CleanupPlan Prepare(string rootPath, Action<string>? onScanning = null,
+        Action<string, int, int>? onProgress = null, Action<string>? onDetail = null)
     {
         var root = Path.TrimEndingDirectorySeparator(Path.GetFullPath(rootPath));
         if (!Directory.Exists(root))
@@ -24,29 +28,11 @@ public sealed class ArtifactCleaner
         // Only explicit working-tree roots at or below the scan root are eligible.
         // In particular, an ancestor repository must not turn Downloads into a cleanup target.
         Discover(root, candidates, metadata, errors, onScanning);
-        var entries = new List<CleanupEntry>();
-        long bytesToDelete = 0;
-        var files = 0;
-        var directories = 0;
-        var lastDetail = Stopwatch.GetTimestamp();
-
-        void ReportDetail(string repository, string activity, string? path = null, bool force = false)
-        {
-            if (onDetail is null || (!force && Stopwatch.GetElapsedTime(lastDetail).TotalMilliseconds < 100))
-                return;
-            lastDetail = Stopwatch.GetTimestamp();
-            var name = Path.GetRelativePath(root, repository);
-            if (name == ".")
-                name = new DirectoryInfo(root).Name;
-            var location = path is null ? "" : $": {Path.GetRelativePath(repository, path)}";
-            onDetail($"{name}\n  {activity}{location}\n  {files:N0} files, {directories:N0} folders eligible; {bytesToDelete:N0} bytes");
-        }
-
         var validated = 0;
         foreach (var repository in candidates)
         {
             onProgress?.Invoke("Validating repositories", ++validated, candidates.Count);
-            ReportDetail(repository, "Checking working-tree root", force: true);
+            onDetail?.Invoke($"{repository}\n  Checking working-tree root");
             var topLevel = Git(repository, "rev-parse", "--show-toplevel");
             if (topLevel.ExitCode != 0 || !PathComparer.Equals(repository,
                 Path.TrimEndingDirectorySeparator(Path.GetFullPath(topLevel.Output.TrimEnd('\r', '\n')))))
@@ -61,8 +47,7 @@ public sealed class ArtifactCleaner
             var valid = true;
             foreach (var option in new[] { "--absolute-git-dir", "--git-common-dir" })
             {
-                ReportDetail(repository, option == "--absolute-git-dir"
-                    ? "Locating Git metadata" : "Locating shared Git metadata", force: true);
+                onDetail?.Invoke($"{repository}\n  Locating Git metadata");
                 var location = Git(repository, "rev-parse", "--path-format=absolute", option);
                 if (location.ExitCode != 0)
                 {
@@ -76,6 +61,51 @@ public sealed class ArtifactCleaner
             if (valid)
                 repositories.Add(repository);
         }
+        return new CleanupPlan(root, repositories, metadata, Array.Empty<CleanupEntry>(), 0,
+            errors.AsReadOnly(), skippedRepositories.AsReadOnly());
+    }
+
+    public CleanupPlan Calculate(CleanupPlan prepared, Action<string, int, int>? onProgress = null,
+        Action<string>? onDetail = null, Action<CleanupCalculation>? onUpdate = null,
+        CancellationToken cancellationToken = default)
+    {
+        var root = prepared.RootPath;
+        var repositories = prepared.Repositories;
+        var metadata = prepared.Metadata;
+        var errors = prepared.Errors.ToList();
+        var entries = new List<CleanupEntry>();
+        var completed = new List<string>();
+        long bytesToDelete = 0;
+        var files = 0;
+        var directories = 0;
+        var lastDetail = Stopwatch.GetTimestamp();
+        var lastUpdate = Stopwatch.GetTimestamp();
+
+        CleanupPlan Snapshot() => new(root, repositories, metadata, Array.AsReadOnly(entries.ToArray()),
+            bytesToDelete, Array.AsReadOnly(errors.ToArray()), prepared.SkippedRepositories);
+
+        void Publish(bool force = false)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            if (onUpdate is null || (!force && Stopwatch.GetElapsedTime(lastUpdate).TotalMilliseconds < 100))
+                return;
+            lastUpdate = Stopwatch.GetTimestamp();
+            onUpdate(new CleanupCalculation(Snapshot(), Array.AsReadOnly(completed.ToArray())));
+        }
+
+        void ReportDetail(string repository, string activity, string? path = null, bool force = false)
+        {
+            Publish();
+            if (onDetail is null || (!force && Stopwatch.GetElapsedTime(lastDetail).TotalMilliseconds < 100))
+                return;
+            lastDetail = Stopwatch.GetTimestamp();
+            var name = Path.GetRelativePath(root, repository);
+            if (name == ".")
+                name = new DirectoryInfo(root).Name;
+            var location = path is null ? "" : $": {Path.GetRelativePath(repository, path)}";
+            onDetail($"{name}\n  {activity}{location}\n  {files:N0} files, {directories:N0} folders eligible; {bytesToDelete:N0} bytes");
+        }
+
         var calculated = 0;
         foreach (var repository in repositories.Order(PathComparer))
         {
@@ -84,9 +114,9 @@ public sealed class ArtifactCleaner
             {
                 // Git supplies untracked ignored paths, so tracked files are never candidates.
                 ReportDetail(repository, "Asking Git for ignored files", force: true);
-                var ignoredFiles = IgnoredPaths(repository, false);
+                var ignoredFiles = IgnoredPaths(repository, false, cancellationToken);
                 ReportDetail(repository, "Asking Git for ignored folders", force: true);
-                var ignoredDirectories = IgnoredPaths(repository, true);
+                var ignoredDirectories = IgnoredPaths(repository, true, cancellationToken);
                 var directoryCandidates = new HashSet<string>(PathComparer);
                 var removed = new HashSet<string>(PathComparer);
                 var safeDirectories = new Dictionary<string, bool>(PathComparer);
@@ -140,10 +170,11 @@ public sealed class ArtifactCleaner
             {
                 errors.Add($"{repository}: {ex.Message}");
             }
+            completed.Add(repository);
+            Publish(force: true);
         }
 
-        return new CleanupPlan(root, repositories, metadata, entries.AsReadOnly(), bytesToDelete,
-            errors.AsReadOnly(), skippedRepositories.AsReadOnly());
+        return Snapshot();
     }
 
     public CleanupResult Delete(CleanupPlan plan, Action<string>? onRemoving = null,
@@ -235,12 +266,12 @@ public sealed class ArtifactCleaner
         }
     }
 
-    private static string[] IgnoredPaths(string repository, bool directories)
+    private static string[] IgnoredPaths(string repository, bool directories, CancellationToken cancellationToken = default)
     {
         var arguments = new List<string> { "ls-files", "--others", "--ignored", "--exclude-standard", "-z" };
         if (directories)
             arguments.Add("--directory");
-        var result = Git(repository, arguments.ToArray());
+        var result = Git(repository, cancellationToken, arguments.ToArray());
         if (result.ExitCode != 0)
             throw new InvalidOperationException(result.Error.Trim());
         return result.Output.Split('\0', StringSplitOptions.RemoveEmptyEntries)
@@ -322,7 +353,12 @@ public sealed class ArtifactCleaner
     private static bool IsFileSystemError(Exception ex) => ex is IOException or UnauthorizedAccessException;
 
     private static (int ExitCode, string Output, string Error) Git(string directory, params string[] arguments)
+        => Git(directory, CancellationToken.None, arguments);
+
+    private static (int ExitCode, string Output, string Error) Git(string directory,
+        CancellationToken cancellationToken, params string[] arguments)
     {
+        cancellationToken.ThrowIfCancellationRequested();
         var startInfo = new ProcessStartInfo("git")
         {
             WorkingDirectory = directory,
@@ -343,7 +379,18 @@ public sealed class ArtifactCleaner
             ?? throw new InvalidOperationException("Could not start Git.");
         var output = process.StandardOutput.ReadToEndAsync();
         var error = process.StandardError.ReadToEndAsync();
-        process.WaitForExit();
+        try
+        {
+            process.WaitForExitAsync(cancellationToken).GetAwaiter().GetResult();
+        }
+        catch (OperationCanceledException)
+        {
+            if (!process.HasExited)
+                process.Kill();
+            process.WaitForExit();
+            Task.WhenAll(output, error).GetAwaiter().GetResult();
+            throw;
+        }
         return (process.ExitCode, output.GetAwaiter().GetResult(), error.GetAwaiter().GetResult());
     }
 }

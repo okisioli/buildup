@@ -474,7 +474,7 @@ static CleanupResult PickFolders(ArtifactCleaner cleaner, CleanupPlan plan, Canc
                 else if (key is ConsoleKey.UpArrow or ConsoleKey.DownArrow)
                 {
                     confirming = false;
-                    selected = Math.Clamp(selected + (key == ConsoleKey.UpArrow ? -1 : 1), 0, rows.Count - 1);
+                    selected = (selected + (key == ConsoleKey.UpArrow ? rows.Count - 1 : 1)) % rows.Count;
                 }
                 else if (key is ConsoleKey.RightArrow or ConsoleKey.LeftArrow || input.KeyChar is '+' or '-')
                 {

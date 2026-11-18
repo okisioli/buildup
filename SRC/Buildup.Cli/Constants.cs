@@ -2,6 +2,10 @@ using Spectre.Console;
 
 internal static class Constants
 {
+    public static readonly Style CalculatingSpinner = new(foreground: Color.White);
+    public static readonly Style CalculatingFolder = new(foreground: Color.Grey);
+    public static readonly Style SelectedCalculatingFolder = new(foreground: Color.Grey,
+        decoration: Decoration.Bold | Decoration.Invert);
     public static readonly Style FolderName = new(foreground: null, background: null);
     public static readonly Style SelectedFolder = new(foreground: null, background: null,
         decoration: Decoration.Bold | Decoration.Invert);

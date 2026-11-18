@@ -69,6 +69,56 @@ public sealed class ArtifactCleaner
         Action<string>? onDetail = null, Action<CleanupCalculation>? onUpdate = null,
         CancellationToken cancellationToken = default)
     {
+        var gate = new object();
+        var results = new Dictionary<string, CleanupPlan>(PathComparer);
+        var completed = new HashSet<string>(PathComparer);
+        var started = 0;
+
+        // Worker-local plans keep measurement and directory traversal independent. Only
+        // immutable snapshots and callbacks cross the gate, including noninteractive output.
+        CleanupPlan Snapshot()
+        {
+            var plans = prepared.Repositories.Order(PathComparer)
+                .Where(results.ContainsKey).Select(repository => results[repository]).ToArray();
+            return new CleanupPlan(prepared.RootPath, prepared.Repositories, prepared.Metadata,
+                Array.AsReadOnly(plans.SelectMany(plan => plan.Entries).ToArray()),
+                plans.Sum(plan => plan.BytesToDelete),
+                Array.AsReadOnly(prepared.Errors.Concat(plans.SelectMany(plan => plan.Errors)).ToArray()),
+                prepared.SkippedRepositories);
+        }
+
+        Parallel.ForEachAsync(prepared.Repositories.Order(PathComparer), new ParallelOptions
+        {
+            MaxDegreeOfParallelism = Math.Min(4, Environment.ProcessorCount),
+            CancellationToken = cancellationToken
+        }, (repository, workerCancellation) =>
+        {
+            lock (gate)
+                onProgress?.Invoke("Calculating results", ++started, prepared.Repositories.Count);
+            var scoped = new CleanupPlan(prepared.RootPath, new HashSet<string>(PathComparer) { repository },
+                prepared.Metadata, Array.Empty<CleanupEntry>(), 0, Array.Empty<string>(), Array.Empty<string>());
+            CalculateRepository(scoped, onDetail is null ? null : detail =>
+            {
+                lock (gate)
+                    onDetail(detail);
+            }, update =>
+            {
+                lock (gate)
+                {
+                    results[repository] = update.Plan;
+                    completed.UnionWith(update.CompletedRepositories);
+                    onUpdate?.Invoke(new CleanupCalculation(Snapshot(),
+                        Array.AsReadOnly(completed.Order(PathComparer).ToArray())));
+                }
+            }, workerCancellation);
+            return ValueTask.CompletedTask;
+        }).GetAwaiter().GetResult();
+        return Snapshot();
+    }
+
+    private static CleanupPlan CalculateRepository(CleanupPlan prepared, Action<string>? onDetail,
+        Action<CleanupCalculation> onUpdate, CancellationToken cancellationToken)
+    {
         var root = prepared.RootPath;
         var repositories = prepared.Repositories;
         var metadata = prepared.Metadata;
@@ -106,10 +156,8 @@ public sealed class ArtifactCleaner
             onDetail($"{name}\n  {activity}{location}\n  {files:N0} files, {directories:N0} folders eligible; {bytesToDelete:N0} bytes");
         }
 
-        var calculated = 0;
-        foreach (var repository in repositories.Order(PathComparer))
+        foreach (var repository in repositories)
         {
-            onProgress?.Invoke("Calculating results", ++calculated, repositories.Count);
             try
             {
                 // Git supplies untracked ignored paths, so tracked files are never candidates.

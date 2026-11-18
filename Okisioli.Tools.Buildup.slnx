@@ -1,0 +1,6 @@
+<Solution>
+  <Folder Name="/SRC/">
+    <Project Path="SRC/Okisioli.Tools.Buildup.Core/Okisioli.Tools.Buildup.Core.csproj" />
+    <Project Path="SRC/Okisioli.Tools.Buildup.CLI/Okisioli.Tools.Buildup.CLI.csproj" />
+  </Folder>
+</Solution>

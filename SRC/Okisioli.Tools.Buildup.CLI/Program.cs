@@ -1,4 +1,4 @@
-using Buildup.Core;
+using Okisioli.Tools.Buildup.Core;
 using Spectre.Console;
 
 if (args.Length == 1 && args[0] is "--help" or "-h")

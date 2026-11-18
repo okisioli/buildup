@@ -1,7 +1,7 @@
 using System.Collections.Concurrent;
 using System.Diagnostics;
 
-namespace Buildup.Core;
+namespace Okisioli.Tools.Buildup.Core;
 
 public sealed class ArtifactCleaner
 {

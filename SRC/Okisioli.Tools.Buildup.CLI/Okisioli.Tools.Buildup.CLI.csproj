@@ -1,0 +1,20 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <AssemblyName>Okisioli.Tools.Buildup.CLI</AssemblyName>
+    <RootNamespace>Okisioli.Tools.Buildup.CLI</RootNamespace>
+    <PackAsTool>true</PackAsTool>
+    <ToolCommandName>buildup</ToolCommandName>
+    <PackageId>Okisioli.Tools.Buildup</PackageId>
+    <Version>1.0.0</Version>
+    <Authors>Okisioli</Authors>
+    <Description>Interactive cleanup of Git-ignored build artifacts with a preview before deletion.</Description>
+    <PackageReleaseNotes>Initial .NET tool release with interactive Git-ignored artifact cleanup.</PackageReleaseNotes>
+    <RepositoryUrl>https://github.com/oli-g-sk/buildup</RepositoryUrl>
+    <PublishDir>$(MSBuildThisFileDirectory)../../Build/publish/$(RuntimeIdentifier)/</PublishDir>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="Spectre.Console" />
+    <ProjectReference Include="../Okisioli.Tools.Buildup.Core/Okisioli.Tools.Buildup.Core.csproj" />
+  </ItemGroup>
+</Project>

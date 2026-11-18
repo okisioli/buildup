@@ -162,7 +162,7 @@ static CleanupPlan Scan(ArtifactCleaner cleaner, string root, bool animate)
 }
 
 static List<(string Path, long Bytes, int Remaining, bool HasChildren)> CleanupFolders(CleanupPlan plan,
-    HashSet<string>? deleted = null, bool includeRepositories = false)
+    HashSet<string>? deleted = null)
 {
     var comparer = OperatingSystem.IsWindows() ? StringComparer.OrdinalIgnoreCase : StringComparer.Ordinal;
     var sizes = new Dictionary<string, (long Bytes, int Remaining)>(comparer);
@@ -180,23 +180,10 @@ static List<(string Path, long Bytes, int Remaining, bool HasChildren)> CleanupF
         }
     }
 
-    // The interactive tree starts with validated repositories before any entries are measured.
-    foreach (var repository in includeRepositories ? plan.RepositoryRoots : Array.Empty<string>())
-    {
-        var folder = repository;
-        while (true)
-        {
-            sizes.TryAdd(folder, (0, 0));
-            if (comparer.Equals(folder, plan.RootPath))
-                break;
-            folder = Path.GetDirectoryName(folder)!;
-        }
-    }
-
     var children = sizes.Keys.Where(folder => !comparer.Equals(folder, plan.RootPath))
         .ToLookup(folder => Path.GetDirectoryName(folder)!, comparer);
     var rows = new List<(string Path, long Bytes, int Remaining, bool HasChildren)>();
-    if (plan.RepositoryRoots.Contains(plan.RootPath, comparer))
+    if (plan.RepositoryRoots.Contains(plan.RootPath, comparer) && sizes.ContainsKey(plan.RootPath))
         AddFolder(plan.RootPath);
     else
         foreach (var child in children[plan.RootPath].Order(comparer))
@@ -245,7 +232,7 @@ static CleanupResult PickFolders(ArtifactCleaner cleaner, CleanupPlan plan)
 
     var deleted = new HashSet<string>(comparer);
     var expanded = new HashSet<string>(comparer);
-    var allRows = CleanupFolders(plan, deleted, includeRepositories: true);
+    var allRows = CleanupFolders(plan, deleted);
     var rows = VisibleRows();
     var saved = allRows.ToDictionary(row => row.Path, _ => 0L, comparer);
     var errors = new List<string>();
@@ -256,7 +243,21 @@ static CleanupResult PickFolders(ArtifactCleaner cleaner, CleanupPlan plan)
     var confirming = false;
     var deleting = false;
     var finished = false;
-    var status = "Cleanup removes previewed artifacts, including descendants; repository roots are preserved.";
+    var status = "Calculating cleanup sizes; folders appear as artifacts are found.";
+
+    void RebuildRows()
+    {
+        var selectedPath = rows.Count > 0 ? rows[selected].Path : null;
+        allRows = CleanupFolders(plan, deleted);
+        rows = VisibleRows();
+        var newSelection = selectedPath is null ? -1
+            : rows.FindIndex(row => comparer.Equals(row.Path, selectedPath));
+        if (newSelection < 0)
+            confirming = waiting = false;
+        selected = newSelection >= 0 ? newSelection : Math.Clamp(selected, 0, Math.Max(0, rows.Count - 1));
+        foreach (var row in allRows)
+            saved.TryAdd(row.Path, 0);
+    }
 
     List<(string Path, long Bytes, int Remaining, bool HasChildren)> VisibleRows()
     {
@@ -344,13 +345,7 @@ static CleanupResult PickFolders(ArtifactCleaner cleaner, CleanupPlan plan)
                 {
                     plan = update.Plan;
                     completed = new HashSet<string>(update.CompletedRepositories, comparer);
-                    var selectedPath = rows.Count > 0 ? rows[selected].Path : null;
-                    allRows = CleanupFolders(plan, deleted, includeRepositories: true);
-                    rows = VisibleRows();
-                    if (selectedPath is not null)
-                        selected = Math.Max(0, rows.FindIndex(row => comparer.Equals(row.Path, selectedPath)));
-                    foreach (var row in allRows)
-                        saved.TryAdd(row.Path, 0);
+                    RebuildRows();
                 }
                 if (!calculationFinished && calculation.IsCompleted)
                 {
@@ -358,10 +353,7 @@ static CleanupResult PickFolders(ArtifactCleaner cleaner, CleanupPlan plan)
                     completed.UnionWith(plan.RepositoryRoots);
                     errors.AddRange(plan.Errors);
                     calculationFinished = true;
-                    allRows = CleanupFolders(plan, deleted, includeRepositories: true);
-                    rows = VisibleRows();
-                    foreach (var row in allRows)
-                        saved.TryAdd(row.Path, 0);
+                    RebuildRows();
                     status = plan.Entries.Count == 0 ? "No folders to clean. Press Esc to exit."
                         : "Cleanup removes previewed artifacts, including descendants; repository roots are preserved.";
                 }
@@ -381,6 +373,8 @@ static CleanupResult PickFolders(ArtifactCleaner cleaner, CleanupPlan plan)
                         break;
                     confirming = false;
                 }
+                else if (rows.Count == 0)
+                    continue;
                 else if (key is ConsoleKey.UpArrow or ConsoleKey.DownArrow)
                 {
                     confirming = false;
@@ -430,7 +424,7 @@ static CleanupResult PickFolders(ArtifactCleaner cleaner, CleanupPlan plan)
                     bytes += result.BytesDeleted;
                     deleting = false;
                     errors.AddRange(result.Errors);
-                    allRows = CleanupFolders(plan, deleted, includeRepositories: true);
+                    allRows = CleanupFolders(plan, deleted);
                     rows = VisibleRows();
                     status = (allRows.Any(row => row.Remaining > 0 || IsCalculating(row.Path))
                         ? "Remaining items can be cleaned; failed or changed items are preserved and can be retried."

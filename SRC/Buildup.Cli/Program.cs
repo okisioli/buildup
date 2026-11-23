@@ -399,7 +399,7 @@ static CleanupResult PickFolders(ArtifactCleaner cleaner, CleanupPlan plan, Canc
                     line.Append("  ").Append($"{FormatSize(saved[row.Path])} saved", Constants.SavedSize);
             }
             if (isMarked)
-                line.Append("  ").Append("Marked for deletion", Constants.MarkedFolder);
+                line.Append("  ").Append("Press Enter to delete", Constants.MarkedFolder);
             lines.Add(line);
         }
         lines.Add(new Text(""));
@@ -413,9 +413,8 @@ static CleanupResult PickFolders(ArtifactCleaner cleaner, CleanupPlan plan, Canc
         {
             lines.Add(new Text(""));
             lines.Add(new Text("Up/Down navigate | Right/+ expand | Left/- collapse | Delete marks or unmarks | Esc exits"));
-            lines.Add(new Text(calculationFinished
-                ? "Enter permanently cleans the selected marked folder and its descendants."
-                : "Confirm marked folders after the scan finishes."));
+            if (!calculationFinished)
+                lines.Add(new Text("Confirm marked folders after the scan finishes."));
         }
         return new Rows(lines);
     }

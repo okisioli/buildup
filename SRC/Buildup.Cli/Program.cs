@@ -5,7 +5,8 @@ if (args.Length == 1 && args[0] is "--help" or "-h")
 {
     Console.WriteLine("Usage: buildup");
     Console.WriteLine("Deletes ignored files in the current or nearest containing Git repository, or repositories below the current directory.");
-    Console.WriteLine("Previews cleanup; use Up/Down to select, Right/+ to expand, Left/- to collapse the folder or its parent, Delete to clean, and Enter to confirm.");
+    Console.WriteLine("Use Up/Down to select, Right/+ to expand, Left/- to collapse, and Delete to mark or unmark a folder.");
+    Console.WriteLine("After scanning finishes, press Enter to permanently clean the selected marked folder.");
     return 0;
 }
 
@@ -316,12 +317,12 @@ static CleanupResult PickFolders(ArtifactCleaner cleaner, CleanupPlan plan, Canc
         onUpdate: update => Interlocked.Exchange(ref latest, update),
         cancellationToken: cancellation.Token));
     var animation = System.Diagnostics.Stopwatch.StartNew();
-    var waiting = false;
     var calculationFinished = false;
     bool IsCalculating(string folder) => plan.RepositoryRoots
         .Any(repository => IsAtOrBelow(repository, folder) && !completed.Contains(repository));
 
     var deleted = new HashSet<string>(comparer);
+    var marked = new HashSet<string>(comparer);
     var expanded = new HashSet<string>(comparer);
     var allRows = CleanupFolders(plan, deleted, plan.RepositoryRoots);
     var rows = VisibleRows();
@@ -332,7 +333,6 @@ static CleanupResult PickFolders(ArtifactCleaner cleaner, CleanupPlan plan, Canc
     var directories = 0;
     long bytes = 0;
     var selected = 0;
-    var confirming = false;
     var deleting = false;
     var status = "Calculating cleanup sizes; empty branches are removed as counting finishes.";
 
@@ -341,11 +341,13 @@ static CleanupResult PickFolders(ArtifactCleaner cleaner, CleanupPlan plan, Canc
         var selectedPath = rows.Count > 0 ? rows[selected].Path : null;
         allRows = CleanupFolders(plan, deleted,
             plan.RepositoryRoots.Where(repository => !completed.Contains(repository)));
+        if (marked.Count > 0)
+            marked.IntersectWith(allRows.Where(row => marked.Contains(row.Path)
+                && (row.Remaining > 0 || IsCalculating(row.Path)))
+                .Select(row => row.Path));
         rows = VisibleRows();
         var newSelection = selectedPath is null ? -1
             : rows.FindIndex(row => comparer.Equals(row.Path, selectedPath));
-        if (newSelection < 0)
-            confirming = waiting = false;
         selected = newSelection >= 0 ? newSelection : Math.Clamp(selected, 0, Math.Max(0, rows.Count - 1));
         foreach (var row in allRows)
             saved.TryAdd(row.Path, 0);
@@ -380,26 +382,24 @@ static CleanupResult PickFolders(ArtifactCleaner cleaner, CleanupPlan plan, Canc
             var calculating = IsCalculating(row.Path);
             var marker = calculating ? $"{Spinner.Known.Line.Frames[(int)(animation.ElapsedMilliseconds / 100 % Spinner.Known.Line.Frames.Count)]} "
                 : row.HasChildren && (i == selected || expanded.Contains(row.Path)) ? "> " : "  ";
-            var pendingCleanup = confirming && IsAtOrBelow(row.Path, rows[selected].Path);
-            var nameStyle = pendingCleanup
-                ? isSelected ? Constants.ConfirmationFolder : Constants.ConfirmationDescendant
+            var isMarked = marked.Contains(row.Path);
+            var nameStyle = isMarked
+                ? isSelected ? Constants.SelectedMarkedFolder : Constants.MarkedFolder
                 : calculating ? (isSelected ? Constants.SelectedCalculatingFolder : Constants.CalculatingFolder)
                 : row.Remaining == 0 ? (isSelected ? Constants.SelectedCompletedFolder : Constants.CompletedFolder)
                 : isSelected ? Constants.SelectedFolder : Constants.FolderName;
-            var sizeStyle = pendingCleanup ? Constants.ConfirmationSize : Constants.FolderSize;
             var line = new Paragraph(marker, calculating ? Constants.CalculatingSpinner : Style.Plain)
                 .Append(label, nameStyle).Append("  ");
             if (row.Remaining == 0 && !calculating)
                 line.Append($"{FormatSize(saved.GetValueOrDefault(row.Path))} saved", Constants.SavedSize);
             else
             {
-                line.Append(FormatSize(row.Bytes), sizeStyle);
+                line.Append(FormatSize(row.Bytes), Constants.FolderSize);
                 if (saved.GetValueOrDefault(row.Path) > 0)
                     line.Append("  ").Append($"{FormatSize(saved[row.Path])} saved", Constants.SavedSize);
             }
-            if (i == selected && confirming)
-                line.Append("  ").Append(waiting ? "Still calculating, please wait" : "Press Enter to confirm cleanup",
-                    Constants.ConfirmationMessage);
+            if (isMarked)
+                line.Append("  ").Append("Press Enter to delete", Constants.MarkedFolder);
             lines.Add(line);
         }
         lines.Add(new Text(""));
@@ -412,10 +412,9 @@ static CleanupResult PickFolders(ArtifactCleaner cleaner, CleanupPlan plan, Canc
         if (!deleting)
         {
             lines.Add(new Text(""));
-            lines.Add(new Text(confirming && waiting
-                ? "Still calculating, please wait; arrow keys, +/- or Esc cancel confirmation."
-                : confirming ? "Enter confirms cleanup of the selected folder and descendants; arrow keys, +/- or Esc cancel confirmation."
-                : "Up/Down navigate; Right/+ expand; Left/- collapse folder or parent; Delete cleans; Enter confirms; Esc exits."));
+            lines.Add(new Text("Up/Down navigate | Right/+ expand | Left/- collapse | Delete marks or unmarks | Esc exits"));
+            if (!calculationFinished)
+                lines.Add(new Text("Confirm marked folders after the scan finishes."));
         }
         return new Rows(lines);
     }
@@ -451,8 +450,6 @@ static CleanupResult PickFolders(ArtifactCleaner cleaner, CleanupPlan plan, Canc
                     status = plan.Entries.Count == 0 ? "No folders to clean. Press Esc to exit."
                         : "Cleanup removes previewed artifacts, including descendants; repository roots are preserved.";
                 }
-                if (confirming && waiting && !IsCalculating(rows[selected].Path))
-                    confirming = waiting = false;
                 Refresh();
                 if (!Console.KeyAvailable)
                 {
@@ -464,21 +461,15 @@ static CleanupResult PickFolders(ArtifactCleaner cleaner, CleanupPlan plan, Canc
                 if (key == ConsoleKey.C && input.Modifiers.HasFlag(ConsoleModifiers.Control))
                     break;
                 if (key == ConsoleKey.Escape)
-                {
-                    if (!confirming)
-                        break;
-                    confirming = false;
-                }
+                    break;
                 else if (rows.Count == 0)
                     continue;
                 else if (key is ConsoleKey.UpArrow or ConsoleKey.DownArrow)
                 {
-                    confirming = false;
                     selected = (selected + (key == ConsoleKey.UpArrow ? rows.Count - 1 : 1)) % rows.Count;
                 }
                 else if (key is ConsoleKey.RightArrow or ConsoleKey.LeftArrow || input.KeyChar is '+' or '-')
                 {
-                    confirming = false;
                     var row = rows[selected];
                     if (key == ConsoleKey.RightArrow || input.KeyChar == '+')
                     {
@@ -491,14 +482,14 @@ static CleanupResult PickFolders(ArtifactCleaner cleaner, CleanupPlan plan, Canc
 
                     rows = VisibleRows();
                 }
-                else if (key == ConsoleKey.Delete && (IsCalculating(rows[selected].Path) || rows[selected].Remaining > 0))
+                else if (key == ConsoleKey.Delete)
                 {
-                    confirming = true;
-                    waiting = IsCalculating(rows[selected].Path);
+                    var row = rows[selected];
+                    if (!marked.Remove(row.Path) && (row.Remaining > 0 || IsCalculating(row.Path)))
+                        marked.Add(row.Path);
                 }
-                else if (key == ConsoleKey.Enter && confirming && !waiting && !IsCalculating(rows[selected].Path))
+                else if (key == ConsoleKey.Enter && calculationFinished && marked.Remove(rows[selected].Path))
                 {
-                    confirming = false;
                     deleting = true;
                     status = "Deleting selected artifacts; rechecking Git ignore rules...";
                     Refresh();
@@ -523,7 +514,7 @@ static CleanupResult PickFolders(ArtifactCleaner cleaner, CleanupPlan plan, Canc
                     if (result.Errors.Count > 0)
                         attemptErrors.Add($"ERROR: {result.Errors.Count} files couldn't be deleted");
                     RebuildRows();
-                    status = allRows.Any(row => row.Remaining > 0 || IsCalculating(row.Path))
+                    status = allRows.Any(row => row.Remaining > 0)
                         ? "Remaining items can be cleaned; failed or changed items are preserved and can be retried."
                         : "Cleanup complete. Press Esc to exit.";
                 }
